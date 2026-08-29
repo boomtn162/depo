@@ -194,12 +194,16 @@ const RE_RIDE_DATE = /วันที่ขึ้นขบวนรถ\s*([^)]+?
 const RE_PRINTED_AT = /วันเวลาที่พิมพ์\s*:\s*([\d\-:. ]+)/;
 const RE_GRAND_TOTAL = /ยอดรวมทั้งหมด\s*:\s*(.+?)\s*น้ำหนักรวมทั้งหมด\s*:\s*([\d,]+(?:\.\d+)?)\s*กิโลกรัม/;
 
-// full item row: seq, tracking no, qty, unit, name, freight, weight
-const RE_ITEM_FULL = /^(\d{1,3})\s+([A-Za-z][\w\-\/]{3,})\s+(\d+)\s+(\S+)\s+(.+?)\s+([\d,]+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)$/;
-// continuation row (extra item under the same parcel): qty, unit, name, freight, weight
-const RE_ITEM_CONT = /^(\d+)\s+(\S+)\s+(.+?)\s+([\d,]+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)$/;
+// full item row: seq, tracking no, qty, "unit? name" (unit is not always present —
+// some rows print just a bare quantity with no unit word), freight, weight
+const RE_ITEM_FULL = /^(\d{1,3})\s+([A-Za-z][\w\-\/]{3,})\s+(\d+)\s+(.+?)\s+([\d,]+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)$/;
+// continuation row (extra item under the same parcel): qty, "unit? name", freight, weight
+const RE_ITEM_CONT = /^(\d+)\s+(.+?)\s+([\d,]+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)$/;
 // station header: "1001 กรุงเทพ" — pure Thai/space name after a 3-4 digit code, no digits in the name
 const RE_STATION = /^(\d{3,4})\s+([฀-๿()\.\s]+)$/;
+// a station header line occasionally gets fused with the item row right after it
+// during text extraction (e.g. "4142 ประจวบคีรีขันธ์ 1 PAN6908-... 17 ... 1,446 310") — split it in two.
+const RE_EMBEDDED_STATION_ITEM = /^(\d{3,4})\s+([฀-๿()\.]+(?:\s[฀-๿()\.]+)*)\s+(\d{1,3}\s+[A-Za-z][\w\-\/]{3,}\s+.+)$/;
 
 function toNum(s) {
   return parseFloat(String(s).replace(/,/g, ''));
@@ -207,6 +211,36 @@ function toNum(s) {
 
 // หน่วยนับที่ถือว่าเป็น "ยานพาหนะ" (แยกออกจากจำนวนสินค้าทั่วไป)
 const VEHICLE_UNITS = new Set(['คัน']);
+// หน่วยนับที่รู้จัก — ใช้แยก "หน่วย" ออกจาก "ชื่อรายการ" ในคอลัมน์เดียวกัน
+// บางแถวไม่มีคำหน่วยเลย (เช่น "17 เครื่องบริโภค(ของกิน)") จึงแยกไม่ได้และถือว่าไม่มีหน่วย
+const KNOWN_UNITS = new Set([
+  'กล่อง', 'ชิ้น', 'คัน', 'ถุง', 'กระสอบ', 'ลัง', 'มัด', 'แผง', 'ม้วน',
+  'ตะกร้า', 'ห่อ', 'ใบ', 'ชุด', 'ขวด', 'ถัง', 'กระบอก', 'แผ่น', 'คู่', 'โหล', 'ฟอง',
+]);
+
+// แยก "หน่วย" กับ "ชื่อรายการ" จากข้อความที่เหลือหลังคอลัมน์จำนวน
+function splitUnitAndName(desc) {
+  const sp = desc.indexOf(' ');
+  if (sp === -1) return { unit: '', name: desc };
+  const first = desc.slice(0, sp);
+  if (KNOWN_UNITS.has(first)) return { unit: first, name: desc.slice(sp + 1).trim() };
+  return { unit: '', name: desc };
+}
+
+// ต่อบรรทัดที่หัวสถานีถูกรวมเข้ากับแถวรายการแรกโดยไม่ตั้งใจ ให้แยกเป็นสองบรรทัด
+function preprocessLines(lines) {
+  const out = [];
+  for (const raw of lines) {
+    const m = raw.match(RE_EMBEDDED_STATION_ITEM);
+    if (m) {
+      out.push(`${m[1]} ${m[2]}`);
+      out.push(m[3]);
+    } else {
+      out.push(raw);
+    }
+  }
+  return out;
+}
 
 function parseManifest(lines) {
   const meta = { train: '', origin: '', rideDate: '', printedAt: '' };
@@ -227,7 +261,7 @@ function parseManifest(lines) {
     return currentStation;
   };
 
-  for (const raw of lines) {
+  for (const raw of preprocessLines(lines)) {
     const line = raw.trim();
     if (!line) continue;
 
@@ -256,14 +290,14 @@ function parseManifest(lines) {
 
     const full = line.match(RE_ITEM_FULL);
     if (full) {
+      const { unit, name } = splitUnitAndName(full[4].trim());
       const row = {
         seq: full[1],
         trackingNo: full[2],
         qty: parseInt(full[3], 10),
-        unit: full[4],
-        name: full[5].trim(),
-        freight: toNum(full[6]),
-        weight: toNum(full[7]),
+        unit, name,
+        freight: toNum(full[5]),
+        weight: toNum(full[6]),
         stationCode: unassigned().code,
         stationName: unassigned().name,
       };
@@ -274,14 +308,14 @@ function parseManifest(lines) {
 
     const cont = line.match(RE_ITEM_CONT);
     if (cont) {
+      const { unit, name } = splitUnitAndName(cont[2].trim());
       const row = {
         seq: '',
         trackingNo: '',
         qty: parseInt(cont[1], 10),
-        unit: cont[2],
-        name: cont[3].trim(),
-        freight: toNum(cont[4]),
-        weight: toNum(cont[5]),
+        unit, name,
+        freight: toNum(cont[3]),
+        weight: toNum(cont[4]),
         stationCode: unassigned().code,
         stationName: unassigned().name,
       };
@@ -430,7 +464,9 @@ const fmtInt = n => Number(n).toLocaleString('th-TH');
 const fmtNum = n => Number(n).toLocaleString('th-TH', { maximumFractionDigits: 2 });
 
 function breakdownText(unitCounts) {
-  return Object.entries(unitCounts).map(([u, c]) => `${fmtInt(c)} ${u}`).join(', ');
+  return Object.entries(unitCounts)
+    .map(([u, c]) => `${fmtInt(c)} ${u || '(ไม่ระบุหน่วย)'}`)
+    .join(', ');
 }
 
 // holds the current OCR result so edits in the review table can recompute it
@@ -479,12 +515,17 @@ function renderHeadlineAndVerify(data) {
     const weightMatches = Math.abs(printedTotal.weight - totals.weight) < 0.05;
     const printedMap = {};
     printedTotal.breakdown.forEach(b => { printedMap[b.unit] = b.count; });
-    const unitsMatch = Object.keys(printedMap).length === Object.keys(totals.unitCounts).length &&
+    const printedTotalCount = printedTotal.breakdown.reduce((s, b) => s + b.count, 0);
+    const exactUnitsMatch = Object.keys(printedMap).length === Object.keys(totals.unitCounts).length &&
       Object.entries(printedMap).every(([u, c]) => totals.unitCounts[u] === c);
+    const totalCountMatches = printedTotalCount === totals.totalPieces;
     verifyEl.hidden = false;
-    if (weightMatches && unitsMatch) {
+    if (weightMatches && exactUnitsMatch) {
       verifyEl.className = 'verify-msg ok';
       verifyEl.textContent = '✓ ยอดรวมที่คำนวณตรงกับ "ยอดรวมทั้งหมด" ที่พิมพ์ไว้ในเอกสาร';
+    } else if (weightMatches && totalCountMatches) {
+      verifyEl.className = 'verify-msg ok';
+      verifyEl.textContent = '✓ น้ำหนักและจำนวนรวมตรงกับเอกสาร (บางแถวในตารางไม่มีคำระบุหน่วยสินค้า จึงจับคู่ชื่อหน่วยกับเอกสารไม่ได้ทั้งหมด แต่ตัวเลขรวมถูกต้อง)';
     } else {
       verifyEl.className = 'verify-msg warn';
       verifyEl.textContent = `⚠ ยอดที่คำนวณไม่ตรงกับเอกสาร (เอกสารระบุ: ${fmtNum(printedTotal.weight)} กก., ${breakdownText(printedMap)}) — โปรดตรวจสอบไฟล์ต้นฉบับ`;
@@ -526,7 +567,7 @@ function renderPdfTables(data) {
       <td>${escapeHtml(r.seq)}</td>
       <td>${escapeHtml(r.trackingNo)}</td>
       <td>${escapeHtml(r.stationName)}</td>
-      <td>${fmtInt(r.qty)} ${escapeHtml(r.unit)}</td>
+      <td>${fmtInt(r.qty)}${r.unit ? ' ' + escapeHtml(r.unit) : ''}</td>
       <td>${escapeHtml(r.name)}</td>
       <td>${fmtNum(r.freight)}</td>
       <td>${fmtNum(r.weight)}</td>
