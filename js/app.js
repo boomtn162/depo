@@ -149,6 +149,9 @@ function toNum(s) {
   return parseFloat(String(s).replace(/,/g, ''));
 }
 
+// หน่วยนับที่ถือว่าเป็น "ยานพาหนะ" (แยกออกจากจำนวนสินค้าทั่วไป)
+const VEHICLE_UNITS = new Set(['คัน']);
+
 function parseManifest(lines) {
   const meta = { train: '', origin: '', rideDate: '', printedAt: '' };
   const stations = [];
@@ -238,6 +241,15 @@ function parseManifest(lines) {
   const totalFreight = rows.reduce((s, r) => s + r.freight, 0);
   const unitCounts = {};
   for (const r of rows) unitCounts[r.unit] = (unitCounts[r.unit] || 0) + r.qty;
+
+  // แยก "คัน" (ยานพาหนะ เช่น รถจักรยานยนต์/รถยนต์) ออกจากจำนวนสินค้าทั่วไป
+  const goodsUnitCounts = {};
+  let vehicleCount = 0;
+  for (const [unit, count] of Object.entries(unitCounts)) {
+    if (VEHICLE_UNITS.has(unit)) vehicleCount += count;
+    else goodsUnitCounts[unit] = count;
+  }
+  const totalGoodsPieces = Object.values(goodsUnitCounts).reduce((s, v) => s + v, 0);
   const totalPieces = Object.values(unitCounts).reduce((s, v) => s + v, 0);
   const parcelCount = rows.filter(r => r.trackingNo).length;
 
@@ -253,7 +265,10 @@ function parseManifest(lines) {
 
   return {
     meta, rows, stations: stationSummaries,
-    totals: { weight: totalWeight, freight: totalFreight, unitCounts, totalPieces, parcelCount },
+    totals: {
+      weight: totalWeight, freight: totalFreight, unitCounts, totalPieces, parcelCount,
+      goodsUnitCounts, totalGoodsPieces, vehicleCount,
+    },
     printedTotal,
   };
 }
@@ -277,8 +292,9 @@ function renderResult(data) {
 
   document.getElementById('totalWeight').textContent = fmtNum(totals.weight);
   document.getElementById('totalFreight').textContent = fmtNum(totals.freight);
-  document.getElementById('totalPieces').textContent = fmtInt(totals.totalPieces);
-  document.getElementById('pieceBreakdown').textContent = breakdownText(totals.unitCounts) || '-';
+  document.getElementById('totalPieces').textContent = fmtInt(totals.totalGoodsPieces);
+  document.getElementById('pieceBreakdown').textContent = breakdownText(totals.goodsUnitCounts) || '-';
+  document.getElementById('totalVehicles').textContent = fmtInt(totals.vehicleCount);
 
   // cross-check against the document's own printed grand-total line, if found
   const verifyEl = document.getElementById('verifyMsg');
@@ -336,8 +352,9 @@ function fillSlip(data) {
     meta.rideDate ? `วันที่ขึ้นขบวนรถ ${meta.rideDate}` : '';
   document.getElementById('slipWeight').textContent = `${fmtNum(totals.weight)} กก.`;
   document.getElementById('slipFreight').textContent = `${fmtNum(totals.freight)} บาท`;
-  document.getElementById('slipPieces').textContent = `${fmtInt(totals.totalPieces)} ชิ้น/หน่วย`;
-  document.getElementById('slipBreakdown').textContent = breakdownText(totals.unitCounts);
+  document.getElementById('slipPieces').textContent = `${fmtInt(totals.totalGoodsPieces)} ชิ้น/หน่วย`;
+  document.getElementById('slipBreakdown').textContent = breakdownText(totals.goodsUnitCounts);
+  document.getElementById('slipVehicles').textContent = `${fmtInt(totals.vehicleCount)} คัน`;
   document.getElementById('slipParcelCount').textContent = fmtInt(totals.parcelCount);
 
   const table = document.getElementById('slipStationTable');
