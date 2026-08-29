@@ -360,12 +360,13 @@ function fillSlip(data) {
   const table = document.getElementById('slipStationTable');
   const rowsHtml = stations.map(s => `
     <tr>
-      <td>${escapeHtml(s.code)} ${escapeHtml(s.name)}</td>
+      <td class="code">${escapeHtml(s.code)}</td>
+      <td class="name">${escapeHtml(s.name)}</td>
       <td class="num">${fmtNum(s.weight)}</td>
       <td class="num">${fmtNum(s.freight)}</td>
     </tr>`).join('');
   table.innerHTML = `
-    <thead><tr><th>สถานี</th><th class="num">กก.</th><th class="num">บาท</th></tr></thead>
+    <thead><tr><th class="code">รหัส</th><th class="name">สถานี</th><th class="num">กก.</th><th class="num">บาท</th></tr></thead>
     <tbody>${rowsHtml}</tbody>`;
 
   document.getElementById('slipFooter').textContent =

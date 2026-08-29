@@ -281,7 +281,7 @@ tfoot td {
   .slip-subtitle {
     font-size: 8.5pt;
     font-weight: 700;
-    margin-bottom: 1mm;
+    margin: 2mm 0 1.5mm;
   }
 
   .slip-table {
@@ -291,12 +291,39 @@ tfoot td {
   }
 
   .slip-table td, .slip-table th {
-    padding: 0.5mm 1mm;
+    padding: 0.8mm 1mm;
     border-bottom: 1px dotted #999;
+    text-align: left;
+    vertical-align: top;
   }
 
-  .slip-table th { text-align: left; }
-  .slip-table td.num, .slip-table th.num { text-align: right; }
+  .slip-table thead th {
+    border-bottom: 1px solid #000;
+    font-weight: 700;
+    color: #000;
+    padding-bottom: 1mm;
+  }
+
+  .slip-table td.num, .slip-table th.num {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .slip-table td.code, .slip-table th.code {
+    color: #555;
+    white-space: nowrap;
+    width: 1%;
+    padding-right: 2mm;
+  }
+
+  .slip-table td.name, .slip-table th.name {
+    word-break: break-word;
+  }
+
+  .slip-table tbody tr:nth-child(even) {
+    background: #f7f7f7;
+  }
 
   .slip-footer {
     font-size: 7pt;
