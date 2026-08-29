@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>สรุปรายการขนส่ง</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="app">
+  <header class="app-header">
+    <h1>สรุปรายการขนส่งจากใบนำมอบสินค้าห่อวัตถุ</h1>
+    <p class="sub">อัปโหลดไฟล์ PDF ใบนำมอบสินค้าห่อวัตถุ (รวม) เพื่อสรุปน้ำหนักรวม ค่าระวาง+ค่า ธ. และจำนวนสินค้า</p>
+  </header>
+
+  <section class="upload-box" id="uploadBox">
+    <input type="file" id="fileInput" accept="application/pdf,.pdf" hidden>
+    <div class="upload-inner" id="uploadInner">
+      <div class="upload-icon">📄</div>
+      <p><button type="button" class="link-btn" id="pickFileBtn">เลือกไฟล์ PDF</button> หรือลากไฟล์มาวางที่นี่</p>
+      <p class="hint">รองรับไฟล์ "ใบนำมอบสินค้าห่อวัตถุ(รวม)" — ประมวลผลทั้งหมดในเบราว์เซอร์ ไม่มีการอัปโหลดขึ้นเซิร์ฟเวอร์</p>
+      <p class="hint"><a href="samples/parcel_list_11.pdf" target="_blank" rel="noopener">ดูตัวอย่างไฟล์ PDF</a></p>
+    </div>
+  </section>
+
+  <p id="statusMsg" class="status-msg" hidden></p>
+
+  <section id="resultSection" class="result-section" hidden>
+
+    <div class="doc-meta" id="docMeta"></div>
+
+    <div class="headline-cards">
+      <div class="card">
+        <div class="card-label">น้ำหนักรวม</div>
+        <div class="card-value" id="totalWeight">-</div>
+        <div class="card-unit">กิโลกรัม</div>
+      </div>
+      <div class="card">
+        <div class="card-label">ค่าระวาง + ค่า ธ. รวม</div>
+        <div class="card-value" id="totalFreight">-</div>
+        <div class="card-unit">บาท</div>
+      </div>
+      <div class="card">
+        <div class="card-label">จำนวนสินค้ารวม</div>
+        <div class="card-value" id="totalPieces">-</div>
+        <div class="card-unit" id="pieceBreakdown">-</div>
+      </div>
+    </div>
+
+    <div id="verifyMsg" class="verify-msg" hidden></div>
+
+    <div class="actions">
+      <button type="button" class="primary-btn" id="printSlipBtn">🖨️ พิมพ์สลิป 77×166 มม.</button>
+      <button type="button" class="secondary-btn" id="resetBtn">อัปโหลดไฟล์ใหม่</button>
+    </div>
+
+    <h2 class="section-title">สรุปแยกตามสถานี/ปลายทาง</h2>
+    <div class="table-wrap">
+      <table id="stationTable">
+        <thead>
+          <tr>
+            <th>รหัส</th>
+            <th>สถานีปลายทาง</th>
+            <th>จำนวนพัสดุ</th>
+            <th>น้ำหนัก (กก.)</th>
+            <th>ค่าระวาง+ค่า ธ. (บาท)</th>
+          </tr>
+        </thead>
+        <tbody id="stationTableBody"></tbody>
+      </table>
+    </div>
+
+    <h2 class="section-title">รายการทั้งหมด</h2>
+    <div class="table-wrap">
+      <table id="itemTable">
+        <thead>
+          <tr>
+            <th>ลำดับ</th>
+            <th>เลขที่</th>
+            <th>สถานี</th>
+            <th>จำนวน</th>
+            <th>รายการ</th>
+            <th>ค่าระวาง+ค่า ธ.</th>
+            <th>น้ำหนัก (กก.)</th>
+          </tr>
+        </thead>
+        <tbody id="itemTableBody"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<!-- Print-only slip, populated by JS, shown only via @media print -->
+<div id="slip" class="slip" aria-hidden="true">
+  <div class="slip-title">สรุปรายการขนส่ง</div>
+  <div class="slip-line" id="slipTrain"></div>
+  <div class="slip-line" id="slipDate"></div>
+  <hr>
+  <div class="slip-stat">
+    <div class="slip-stat-label">น้ำหนักรวม</div>
+    <div class="slip-stat-value" id="slipWeight"></div>
+  </div>
+  <div class="slip-stat">
+    <div class="slip-stat-label">ค่าระวาง+ค่า ธ. รวม</div>
+    <div class="slip-stat-value" id="slipFreight"></div>
+  </div>
+  <div class="slip-stat">
+    <div class="slip-stat-label">จำนวนสินค้ารวม</div>
+    <div class="slip-stat-value" id="slipPieces"></div>
+  </div>
+  <div class="slip-breakdown" id="slipBreakdown"></div>
+  <hr>
+  <div class="slip-line">จำนวนพัสดุ: <span id="slipParcelCount"></span> รายการ</div>
+  <div class="slip-subtitle">สรุปแยกตามสถานี</div>
+  <table class="slip-table" id="slipStationTable"></table>
+  <hr>
+  <div class="slip-footer" id="slipFooter"></div>
+</div>
+
+<script src="vendor/pdfjs/pdf.min.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
