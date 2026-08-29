@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>สรุปรายการขนส่ง</title>
 <!-- bump ?v= on both tags below whenever css/style.css or js/app.js changes, so browsers don't serve a stale cached copy -->
-<link rel="stylesheet" href="css/style.css?v=3">
+<link rel="stylesheet" href="css/style.css?v=4">
 </head>
 <body>
 
@@ -16,11 +16,12 @@
   </header>
 
   <section class="upload-box" id="uploadBox">
-    <input type="file" id="fileInput" accept="application/pdf,.pdf" hidden>
+    <input type="file" id="fileInput" accept="application/pdf,.pdf,image/png,image/jpeg,.png,.jpg,.jpeg" hidden>
     <div class="upload-inner" id="uploadInner">
       <div class="upload-icon">📄</div>
-      <p><button type="button" class="link-btn" id="pickFileBtn">เลือกไฟล์ PDF</button> หรือลากไฟล์มาวางที่นี่</p>
-      <p class="hint">รองรับไฟล์ "ใบนำมอบสินค้าห่อวัตถุ(รวม)" — ประมวลผลทั้งหมดในเบราว์เซอร์ ไม่มีการอัปโหลดขึ้นเซิร์ฟเวอร์</p>
+      <p><button type="button" class="link-btn" id="pickFileBtn">เลือกไฟล์ PDF หรือรูปภาพ</button> หรือลากไฟล์มาวางที่นี่</p>
+      <p class="hint">รองรับไฟล์ PDF "ใบนำมอบสินค้าห่อวัตถุ(รวม)" หรือรูปภาพสกรีนช็อต (.png/.jpg) — ประมวลผลทั้งหมดในเบราว์เซอร์ ไม่มีการอัปโหลดขึ้นเซิร์ฟเวอร์</p>
+      <p class="hint">รูปภาพจะใช้ OCR อ่านข้อความ ซึ่งอาจมีความคลาดเคลื่อน โปรดตรวจสอบตัวเลขก่อนใช้งานจริง</p>
       <p class="hint"><a href="samples/parcel_list_11.pdf" target="_blank" rel="noopener">ดูตัวอย่างไฟล์ PDF</a></p>
     </div>
   </section>
@@ -61,38 +62,79 @@
       <button type="button" class="secondary-btn" id="resetBtn">อัปโหลดไฟล์ใหม่</button>
     </div>
 
-    <h2 class="section-title">สรุปแยกตามสถานี/ปลายทาง</h2>
-    <div class="table-wrap">
-      <table id="stationTable">
-        <thead>
-          <tr>
-            <th>รหัส</th>
-            <th>สถานีปลายทาง</th>
-            <th>จำนวนพัสดุ</th>
-            <th>น้ำหนัก (กก.)</th>
-            <th>ค่าระวาง+ค่า ธ. (บาท)</th>
-          </tr>
-        </thead>
-        <tbody id="stationTableBody"></tbody>
-      </table>
+    <div id="pdfDetailSection">
+      <h2 class="section-title">สรุปแยกตามสถานี/ปลายทาง</h2>
+      <div class="table-wrap">
+        <table id="stationTable">
+          <thead>
+            <tr>
+              <th>รหัส</th>
+              <th>สถานีปลายทาง</th>
+              <th>จำนวนพัสดุ</th>
+              <th>น้ำหนัก (กก.)</th>
+              <th>ค่าระวาง+ค่า ธ. (บาท)</th>
+            </tr>
+          </thead>
+          <tbody id="stationTableBody"></tbody>
+        </table>
+      </div>
+
+      <h2 class="section-title">รายการทั้งหมด</h2>
+      <div class="table-wrap">
+        <table id="itemTable">
+          <thead>
+            <tr>
+              <th>ลำดับ</th>
+              <th>เลขที่</th>
+              <th>สถานี</th>
+              <th>จำนวน</th>
+              <th>รายการ</th>
+              <th>ค่าระวาง+ค่า ธ.</th>
+              <th>น้ำหนัก (กก.)</th>
+            </tr>
+          </thead>
+          <tbody id="itemTableBody"></tbody>
+        </table>
+      </div>
     </div>
 
-    <h2 class="section-title">รายการทั้งหมด</h2>
-    <div class="table-wrap">
-      <table id="itemTable">
-        <thead>
-          <tr>
-            <th>ลำดับ</th>
-            <th>เลขที่</th>
-            <th>สถานี</th>
-            <th>จำนวน</th>
-            <th>รายการ</th>
-            <th>ค่าระวาง+ค่า ธ.</th>
-            <th>น้ำหนัก (กก.)</th>
-          </tr>
-        </thead>
-        <tbody id="itemTableBody"></tbody>
-      </table>
+    <div id="ocrDetailSection" hidden>
+      <div class="ocr-warn">⚠️ ข้อมูลนี้อ่านจากรูปภาพด้วย OCR ซึ่ง<strong>อาจอ่านตัวเลขผิดพลาดได้</strong> กรุณาตรวจสอบคอลัมน์ "น้ำหนัก" และ "จำนวน" ในตารางด้านล่าง แก้ไขได้โดยคลิกที่ตัวเลข ก่อนเชื่อผลสรุปด้านบน</div>
+
+      <h2 class="section-title">สรุปแยกตามสถานี (จากภาพ)</h2>
+      <div class="table-wrap">
+        <table id="ocrStationTable">
+          <thead>
+            <tr>
+              <th>สถานี</th>
+              <th>จำนวนรายการ</th>
+              <th>น้ำหนัก (กก.)</th>
+              <th>จำนวนชิ้นรวม</th>
+              <th>ตรวจสอบ</th>
+            </tr>
+          </thead>
+          <tbody id="ocrStationTableBody"></tbody>
+        </table>
+      </div>
+
+      <h2 class="section-title">รายการที่อ่านได้ (แก้ไขได้)</h2>
+      <div class="table-wrap">
+        <table id="ocrItemTable">
+          <thead>
+            <tr>
+              <th>สถานี</th>
+              <th>เลขที่ (เดา)</th>
+              <th>รายการ</th>
+              <th>น้ำหนัก (กก.)</th>
+              <th>จำนวน</th>
+              <th>ยานพาหนะ</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="ocrItemTableBody"></tbody>
+        </table>
+      </div>
+      <button type="button" class="secondary-btn" id="ocrAddRowBtn">+ เพิ่มรายการ</button>
     </div>
   </section>
 </div>
@@ -129,6 +171,8 @@
 </div>
 
 <script src="vendor/pdfjs/pdf.min.js"></script>
-<script src="js/app.js?v=3"></script>
+<script src="vendor/tesseract/tesseract.min.js"></script>
+<!-- bump ?v= here too whenever js/app.js changes -->
+<script src="js/app.js?v=4"></script>
 </body>
 </html>

@@ -217,6 +217,61 @@ tfoot td {
   border-top: 2px solid var(--border);
 }
 
+/* ---------- OCR (image) review ---------- */
+
+.ocr-warn {
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+  border: 1px solid #f0d9a8;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+#ocrItemTable th:nth-child(1), #ocrItemTable td:nth-child(1),
+#ocrItemTable th:nth-child(2), #ocrItemTable td:nth-child(2),
+#ocrItemTable th:nth-child(3), #ocrItemTable td:nth-child(3),
+#ocrStationTable th:nth-child(1), #ocrStationTable td:nth-child(1) {
+  text-align: left;
+  white-space: normal;
+}
+
+#ocrItemTable input[type="number"] {
+  width: 6.5em;
+  text-align: right;
+  font: inherit;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fffdf5;
+}
+
+#ocrItemTable input[type="number"]:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  background: #fff;
+}
+
+#ocrItemTable input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+}
+
+.ocr-del-btn {
+  border: none;
+  background: none;
+  color: #a3231e;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px 6px;
+}
+
+.ocr-row-mismatch { background: #fff8e8; }
+
+#ocrAddRowBtn { margin-top: 10px; }
+
 /* ---------- Print slip (77mm x 166mm) ---------- */
 
 .slip {
@@ -265,11 +320,18 @@ tfoot td {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
+    gap: 2mm;
     margin-bottom: 1.5mm;
   }
 
-  .slip-stat-label { font-size: 8.5pt; }
-  .slip-stat-value { font-size: 11pt; font-weight: 700; }
+  .slip-stat-label { font-size: 8.5pt; flex-shrink: 0; }
+  .slip-stat-value {
+    font-size: 11pt;
+    font-weight: 700;
+    text-align: right;
+    overflow-wrap: break-word;
+    min-width: 0;
+  }
 
   .slip-breakdown {
     font-size: 7.5pt;
