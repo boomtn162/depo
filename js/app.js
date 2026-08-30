@@ -506,6 +506,7 @@ function renderHeadlineAndVerify(data) {
   document.getElementById('totalWeight').textContent = fmtNum(totals.weight);
   document.getElementById('totalFreight').textContent =
     totals.freight == null ? '-' : fmtNum(totals.freight);
+  document.getElementById('totalParcels').textContent = fmtInt(totals.parcelCount);
   document.getElementById('totalPieces').textContent = fmtInt(totals.totalGoodsPieces);
   document.getElementById('pieceBreakdown').textContent = breakdownText(totals.goodsUnitCounts) || '-';
   document.getElementById('totalVehicles').textContent = fmtInt(totals.vehicleCount);
