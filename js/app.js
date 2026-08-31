@@ -581,29 +581,6 @@ function groupRowsIntoStations(rows) {
   return [...byName.values()];
 }
 
-// สรุปยอดตาม "ต้นทาง" ของแต่ละแถว — คู่กับ stations[] (สรุปตามปลายทาง) ที่มีอยู่แล้ว
-// ใช้แสดงในแท็บ "สินค้าส่ง" ให้เห็นยอดแยกตามสถานีที่ส่งออกแทนสถานีที่รับเข้า
-function summarizeRowsByOrigin(rows) {
-  const byOrigin = new Map();
-  for (const r of rows) {
-    const key = r.origin || 'ไม่ระบุต้นทาง';
-    if (!byOrigin.has(key)) byOrigin.set(key, []);
-    byOrigin.get(key).push(r);
-  }
-  return [...byOrigin.entries()].map(([name, rs]) => {
-    const freightRows = rs.filter(r => r.freight != null);
-    return {
-      code: '', name,
-      parcelCount: rs.filter(r => r.trackingNo).length,
-      itemCount: rs.length,
-      weight: rs.reduce((s, r) => s + (r.weight || 0), 0),
-      freight: freightRows.length ? freightRows.reduce((s, r) => s + r.freight, 0) : null,
-      qty: rs.reduce((s, r) => s + (r.qty || 0), 0),
-      printedQty: null, qtyMatches: null,
-    };
-  });
-}
-
 // ---------- Dashboard-screenshot format (parsed via OCR) ----------
 // Different layout from the PDF manifest: grouped by station with a printed
 // "(จำนวน N ชิ้น)" count per station, no ค่าระวาง+ค่า ธ. column, and item rows
@@ -721,21 +698,12 @@ function breakdownText(unitCounts) {
     .join(', ');
 }
 
-// holds the current OCR/batch result so edits in the review table can recompute it
+// holds the current OCR result so edits in the review table can recompute it
 let ocrState = null;
-// holds the current exact single-manifest result (never mutated, but needed
-// so the ส่ง/รับ tab toggle can re-render its station table)
-let pdfState = null;
-// which station breakdown is showing: 'receive' (by ปลายทาง) or 'send' (by ต้นทาง)
-let currentView = 'receive';
 
 function renderResult(data) {
   const isReview = data.source !== 'pdf'; // 'ocr' or 'batch' — both use the editable review UI
-  if (isReview) ocrState = data; else pdfState = data;
-
-  currentView = 'receive';
-  document.querySelectorAll('.view-tab').forEach(b => b.classList.toggle('active', b.dataset.view === 'receive'));
-  updateViewHeadings();
+  if (isReview) ocrState = data;
 
   const { meta, totals } = data;
   const ocrInvolved = data.rows.some(r => r.rowSource === 'ocr');
@@ -825,57 +793,19 @@ function renderHeadlineAndVerify(data) {
   }
 }
 
-// ---------- ส่ง/รับ view toggle: switches the station-breakdown table between
-// grouping by ปลายทาง (สินค้ารับ, the original behaviour) and by ต้นทาง (สินค้าส่ง) ----------
+function renderPdfTables(data) {
+  const { stations, rows } = data;
 
-function updateViewHeadings() {
-  const isSend = currentView === 'send';
-  const heading = isSend ? 'สรุปแยกตามสถานีต้นทาง (สินค้าส่ง)' : 'สรุปแยกตามสถานีปลายทาง (สินค้ารับ)';
-  document.getElementById('pdfStationHeading').textContent = heading;
-  document.getElementById('ocrStationHeading').textContent = heading;
-  document.getElementById('pdfStationColHeading').textContent = isSend ? 'สถานีต้นทาง' : 'สถานีปลายทาง';
-  document.getElementById('ocrStationColHeading').textContent = isSend ? 'ต้นทาง' : 'ปลายทาง';
-}
-
-// re-renders just the station-breakdown table for whichever section is
-// currently visible, using the currently selected ส่ง/รับ view — called on
-// initial render, on tab switch, and after every edit in the review table
-function renderStationView() {
-  if (!document.getElementById('pdfDetailSection').hidden) {
-    if (!pdfState) return;
-    const arr = currentView === 'send' ? summarizeRowsByOrigin(pdfState.rows) : pdfState.stations;
-    renderPdfStationRows(arr);
-  } else if (!document.getElementById('ocrDetailSection').hidden) {
-    if (!ocrState) return;
-    const arr = currentView === 'send' ? summarizeRowsByOrigin(ocrState.rows) : ocrState.stations;
-    renderOcrStationTable(arr);
-  }
-}
-
-document.getElementById('viewTabs').addEventListener('click', (e) => {
-  const btn = e.target.closest('.view-tab');
-  if (!btn) return;
-  currentView = btn.dataset.view;
-  document.querySelectorAll('.view-tab').forEach(b => b.classList.toggle('active', b === btn));
-  updateViewHeadings();
-  renderStationView();
-});
-
-function renderPdfStationRows(stations) {
-  document.getElementById('stationTableBody').innerHTML = stations.map(s => `
+  const stBody = document.getElementById('stationTableBody');
+  stBody.innerHTML = stations.map(s => `
     <tr>
       <td>${escapeHtml(s.code)}</td>
       <td>${escapeHtml(s.name)}</td>
       <td>${fmtInt(s.parcelCount)}</td>
       <td>${fmtNum(s.weight)}</td>
-      <td>${s.freight == null ? '-' : fmtNum(s.freight)}</td>
+      <td>${fmtNum(s.freight)}</td>
     </tr>`).join('');
-}
 
-function renderPdfTables(data) {
-  renderStationView();
-
-  const { rows } = data;
   const itBody = document.getElementById('itemTableBody');
   itBody.innerHTML = rows.map(r => `
     <tr>
@@ -924,7 +854,7 @@ function renderOcrStationTable(stations) {
 }
 
 function renderOcrTables(data) {
-  renderStationView();
+  renderOcrStationTable(data.stations);
   renderOcrItemTable(data);
 }
 
@@ -963,7 +893,7 @@ function recomputeOcrRows() {
   }
   ocrState = buildOcrResult(ocrState.meta, [...byName.values()], ocrState.rows, ocrState.source);
   renderHeadlineAndVerify(ocrState);
-  renderStationView();
+  renderOcrStationTable(ocrState.stations);
   fillSlip(ocrState);
 }
 

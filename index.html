@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>สรุปรายการขนส่ง</title>
 <!-- bump ?v= on both tags below whenever css/style.css or js/app.js changes, so browsers don't serve a stale cached copy -->
-<link rel="stylesheet" href="css/style.css?v=7">
+<link rel="stylesheet" href="css/style.css?v=8">
 </head>
 <body>
 
@@ -68,19 +68,14 @@
       <button type="button" class="secondary-btn" id="resetBtn">อัปโหลดไฟล์ใหม่</button>
     </div>
 
-    <div class="view-tabs" id="viewTabs">
-      <button type="button" class="view-tab active" data-view="receive">📥 สินค้ารับ <span class="view-tab-sub">(แยกตามปลายทาง)</span></button>
-      <button type="button" class="view-tab" data-view="send">📤 สินค้าส่ง <span class="view-tab-sub">(แยกตามต้นทาง)</span></button>
-    </div>
-
     <div id="pdfDetailSection">
-      <h2 class="section-title" id="pdfStationHeading">สรุปแยกตามสถานีปลายทาง (สินค้ารับ)</h2>
+      <h2 class="section-title">สรุปแยกตามสถานี/ปลายทาง</h2>
       <div class="table-wrap">
         <table id="stationTable">
           <thead>
             <tr>
               <th>รหัส</th>
-              <th id="pdfStationColHeading">สถานีปลายทาง</th>
+              <th>สถานีปลายทาง</th>
               <th>จำนวนพัสดุ</th>
               <th>น้ำหนัก (กก.)</th>
               <th>ค่าระวาง+ค่า ธ. (บาท)</th>
@@ -113,12 +108,12 @@
     <div id="ocrDetailSection" hidden>
       <div class="ocr-warn" id="ocrWarn">⚠️ <span id="ocrWarnText"></span></div>
 
-      <h2 class="section-title" id="ocrStationHeading">สรุปแยกตามสถานีปลายทาง (สินค้ารับ)</h2>
+      <h2 class="section-title">สรุปแยกตามสถานี</h2>
       <div class="table-wrap">
         <table id="ocrStationTable">
           <thead>
             <tr>
-              <th id="ocrStationColHeading">สถานี</th>
+              <th>สถานี</th>
               <th>จำนวนรายการ</th>
               <th>น้ำหนัก (กก.)</th>
               <th>ค่าระวาง+ค่า ธ.</th>
@@ -189,6 +184,6 @@
 <script src="vendor/pdfjs/pdf.min.js"></script>
 <script src="vendor/tesseract/tesseract.min.js"></script>
 <!-- bump ?v= here too whenever js/app.js changes -->
-<script src="js/app.js?v=10"></script>
+<script src="js/app.js?v=11"></script>
 </body>
 </html>
