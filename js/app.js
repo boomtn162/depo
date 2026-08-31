@@ -21,7 +21,7 @@ uploadBox.addEventListener('click', (e) => {
   fileInput.click();
 });
 fileInput.addEventListener('change', () => {
-  if (fileInput.files[0]) handleFile(fileInput.files[0]);
+  if (fileInput.files.length) handleFiles(fileInput.files);
 });
 
 ['dragenter', 'dragover'].forEach(evt =>
@@ -37,8 +37,7 @@ fileInput.addEventListener('change', () => {
   })
 );
 uploadBox.addEventListener('drop', (e) => {
-  const file = e.dataTransfer.files && e.dataTransfer.files[0];
-  if (file) handleFile(file);
+  if (e.dataTransfer.files && e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
 });
 
 resetBtn.addEventListener('click', () => {
@@ -66,32 +65,39 @@ function clearStatus() {
 const IS_PDF = f => /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
 const IS_IMAGE = f => /\.(png|jpe?g)$/i.test(f.name) || /^image\/(png|jpe?g)$/.test(f.type);
 
-async function handleFile(file) {
+async function handleFiles(fileList) {
+  const files = Array.from(fileList);
+  if (!files.length) return;
   resultSection.hidden = true;
 
-  if (IS_PDF(file)) {
+  // A single manifest PDF or a single image keeps the original, more tightly
+  // verified single-file flow (exact cross-check / OCR review) unchanged.
+  if (files.length === 1 && IS_PDF(files[0])) {
     setStatus('กำลังอ่านไฟล์ PDF ...');
     try {
-      const buf = await file.arrayBuffer();
-      const lines = await extractLines(buf);
-      const data = parseManifest(lines);
-      if (data.rows.length === 0) {
-        setStatus('อ่านไฟล์ได้ แต่ไม่พบรายการสินค้าตามรูปแบบที่รองรับ (ใบนำมอบสินค้าห่อวัตถุ(รวม))', true);
+      const lines = await extractLines(await files[0].arrayBuffer());
+      const kind = detectPdfKind(lines);
+      if (kind === 'manifest') {
+        const data = parseManifest(lines);
+        if (data.rows.length === 0) {
+          setStatus('อ่านไฟล์ได้ แต่ไม่พบรายการสินค้าตามรูปแบบที่รองรับ (ใบนำมอบสินค้าห่อวัตถุ(รวม))', true);
+          return;
+        }
+        clearStatus();
+        renderResult(data);
         return;
       }
-      clearStatus();
-      renderResult(data);
+      // a receipt (or an unrecognized) single PDF goes through the same
+      // multi-file batch pipeline below so the code path stays in one place
     } catch (err) {
       console.error(err);
       setStatus('เกิดข้อผิดพลาดขณะประมวลผลไฟล์ PDF: ' + (err && err.message ? err.message : err), true);
+      return;
     }
-    return;
-  }
-
-  if (IS_IMAGE(file)) {
+  } else if (files.length === 1 && IS_IMAGE(files[0])) {
     setStatus('กำลังเตรียมระบบอ่านข้อความจากภาพ (OCR) ...');
     try {
-      const lines = await extractLinesFromImage(file, pct =>
+      const lines = await extractLinesFromImage(files[0], pct =>
         setStatus(`กำลังอ่านข้อความจากภาพด้วย OCR ... ${pct}%`)
       );
       const data = parseDashboardOcr(lines);
@@ -99,6 +105,7 @@ async function handleFile(file) {
         setStatus('อ่านภาพได้ แต่ไม่พบรายการที่ตรงรูปแบบที่รองรับ (ตารางรายการใบนำมอบสินค้าห่อวัตถุ) ลองใช้ภาพที่คมชัดกว่านี้', true);
         return;
       }
+      data.rows.forEach(r => { r.sourceFile = files[0].name; });
       clearStatus();
       renderResult(data);
     } catch (err) {
@@ -106,9 +113,75 @@ async function handleFile(file) {
       setStatus('เกิดข้อผิดพลาดขณะอ่านภาพด้วย OCR: ' + (err && err.message ? err.message : err), true);
     }
     return;
+  } else if (files.length === 1) {
+    setStatus('กรุณาเลือกไฟล์ .pdf หรือรูปภาพ .png/.jpg เท่านั้น', true);
+    return;
   }
 
-  setStatus('กรุณาเลือกไฟล์ .pdf หรือรูปภาพ .png/.jpg เท่านั้น', true);
+  await handleBatch(files);
+}
+
+// ---------- Batch: multiple files (any mix of manifest/receipt PDFs and images), merged into one summary ----------
+async function handleBatch(files) {
+  const fileResults = [];
+
+  for (const file of files) {
+    setStatus(`กำลังประมวลผล ${file.name} (${fileResults.length + 1}/${files.length}) ...`);
+    try {
+      if (IS_PDF(file)) {
+        const lines = await extractLines(await file.arrayBuffer());
+        const kind = detectPdfKind(lines);
+        if (kind === 'manifest') {
+          const manifest = parseManifest(lines);
+          const rows = manifest.rows.map(r => mapManifestRowToCommon(r, file.name));
+          fileResults.push({
+            file: file.name, kind: 'manifest', meta: manifest.meta, rows,
+            ok: rows.length > 0, note: rows.length === 0 ? 'ไม่พบรายการในไฟล์นี้' : '',
+          });
+        } else if (kind === 'receipt') {
+          const receipt = parseReceiptPdf(lines, file.name);
+          fileResults.push({
+            file: file.name, kind: 'receipt', meta: receipt.meta, rows: receipt.rows,
+            ok: receipt.internalOk !== false,
+            note: receipt.internalOk === false ? 'ยอดรวมในไฟล์คำนวณไม่ตรง อาจอ่านค่าธรรมเนียมบางรายการไม่ครบ' : '',
+          });
+        } else {
+          fileResults.push({
+            file: file.name, kind: 'unknown', meta: {}, rows: [], ok: false,
+            note: 'ไม่รู้จักรูปแบบไฟล์ PDF นี้ (รองรับเฉพาะใบนำมอบสินค้าห่อวัตถุ(รวม) หรือใบส่งของ/ใบเสร็จรับเงิน)',
+          });
+        }
+      } else if (IS_IMAGE(file)) {
+        const lines = await extractLinesFromImage(file, pct =>
+          setStatus(`กำลังอ่าน OCR ${file.name} (${fileResults.length + 1}/${files.length}) ... ${pct}%`)
+        );
+        const ocr = parseDashboardOcr(lines);
+        ocr.rows.forEach(r => { r.sourceFile = file.name; r.rowSource = 'ocr'; });
+        fileResults.push({
+          file: file.name, kind: 'image', meta: ocr.meta, rows: ocr.rows,
+          ok: ocr.rows.length > 0, note: ocr.rows.length === 0 ? 'อ่านภาพได้ แต่ไม่พบรายการที่ตรงรูปแบบที่รองรับ' : '',
+        });
+      } else {
+        fileResults.push({ file: file.name, kind: 'unknown', meta: {}, rows: [], ok: false, note: 'ไม่รองรับชนิดไฟล์นี้' });
+      }
+    } catch (err) {
+      console.error(err);
+      fileResults.push({ file: file.name, kind: 'unknown', meta: {}, rows: [], ok: false, note: 'เกิดข้อผิดพลาด: ' + (err && err.message ? err.message : err) });
+    }
+  }
+
+  const allRows = fileResults.flatMap(f => f.rows);
+  if (allRows.length === 0) {
+    setStatus('ไม่พบรายการที่อ่านได้จากไฟล์ที่อัปโหลดเลย โปรดตรวจสอบรูปแบบไฟล์', true);
+    renderFileStatusList(fileResults);
+    return;
+  }
+  clearStatus();
+
+  const meta = fileResults.find(f => f.ok && f.meta && f.meta.train)?.meta || { train: '', origin: '', rideDate: '', printedAt: '' };
+  const data = buildOcrResult(meta, groupRowsIntoStations(allRows), allRows, 'batch');
+  data.fileResults = fileResults;
+  renderResult(data);
 }
 
 // ---------- PDF text extraction: group text items into lines by page/y ----------
@@ -242,6 +315,15 @@ function preprocessLines(lines) {
   return out;
 }
 
+// เดารูปแบบไฟล์ PDF จากข้อความในไฟล์: ใบนำมอบสินค้าห่อวัตถุ(รวม) แบบหลายรายการ,
+// หรือใบส่งของ/ใบเสร็จรับเงินแบบรายชิ้นเดียว, หรือไม่รู้จัก
+function detectPdfKind(lines) {
+  const joined = lines.join('\n');
+  if (/ใบนำมอบสินค้าห่อวัตถุ/.test(joined)) return 'manifest';
+  if (/ใบส่งของ\s*\/\s*ใบเสร็จรับเงิน/.test(joined) || /รวมเงินทั้งสิ้น/.test(joined)) return 'receipt';
+  return 'unknown';
+}
+
 function parseManifest(lines) {
   const meta = { train: '', origin: '', rideDate: '', printedAt: '' };
   const stations = [];
@@ -364,6 +446,132 @@ function parseManifest(lines) {
   };
 }
 
+// ---------- Single-parcel receipt format ("ใบส่งของ/ใบเสร็จรับเงิน") ----------
+// Issued per shipment/customer rather than per train — one item (occasionally
+// a few), plus a itemized fee breakdown: ค่าระวาง (freight), ค่าธรรมเนียม (fee,
+// the "ค่า ธ." from the manifest format), ค่าขนขึ้น/ลง (loading/unloading),
+// ค่ารักษา (insurance), minus discounts, totalling รวมเงินทั้งสิ้น.
+// สำเนา/ต้นฉบับใบส่งของมีเลย์เอาต์ 2 คอลัมน์ (ผู้ส่ง | ผู้รับ) ทำให้ข้อความของทั้งสอง
+// ฝั่งไปรวมอยู่บรรทัดเดียวกันหลังแยกข้อความจาก PDF — จับคู่ label:value แบบขอบเขต
+// ด้วย "ป้ายถัดไปที่รู้จัก" แทนการยึดต้น/ท้ายบรรทัด ซึ่งใช้ไม่ได้กับเลย์เอาต์นี้
+const RECEIPT_LABELS = [
+  'ชื่อผู้ส่ง', 'ชื่อผู้รับ', 'ที่อยู่ผู้ส่ง', 'ที่อยู่ผู้รับ', 'โทรศัพท์',
+  'สถานีส่ง', 'สถานีรับ', 'วันที่ส่ง', 'วันเวลาที่ออกใบส่งของ', 'ขบวนรถ', 'จังหวัด',
+];
+const RECEIPT_LABEL_BOUND = RECEIPT_LABELS.map(l => l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+function receiptLabelValue(text, label) {
+  const re = new RegExp(label + '\\s*:\\s*(.+?)(?=\\s+(?:' + RECEIPT_LABEL_BOUND + ')\\s*:|$)');
+  const m = text.match(re);
+  return m ? m[1].trim() : '';
+}
+
+const RE_RECEIPT_TRACKING = /เลขที่\s*:\s*(\S+)/;
+const RE_RECEIPT_TRAIN = /ขบวนรถ\s*:\s*(\S+)/;
+const RE_RECEIPT_QTY = /จำนวน\s*(\d+)\s*(\S+)/g;
+const RE_RECEIPT_WEIGHT = /น้ำหนัก\s*([\d.,]+)\s*\/?\s*[\d.,]*\s*กิโลกรัม/g;
+// ชื่อรายการอยู่ระหว่าง "1." (ลำดับที่ในตาราง) กับ "จำนวน N หน่วย" แต่มักมีข้อความ
+// จากคอลัมน์ค่าธรรมเนียมข้างๆ ปนมาด้วย (เพราะอยู่แถวเดียวกันในตาราง) ต้องกรองออก
+const RE_RECEIPT_ITEM_RAW = /(?:^|\s)1\.\s*(.+?)\s*จำนวน\s*\d+\s*\S+/;
+const RECEIPT_FEE_LABELS = ['ค่าระวาง', 'ค่าธรรมเนียม', 'ค่าขนขึ้น', 'ค่าขนลง', 'ค่ารักษา'];
+const feeAmountRe = label => new RegExp('([\\d,]+\\.\\d{2})\\s*' + label + '(?!\\S)');
+
+function cleanReceiptItemName(raw) {
+  let s = raw;
+  for (const label of RECEIPT_FEE_LABELS) s = s.replace(new RegExp('[\\d,]+\\.\\d{2}\\s*' + label, 'g'), '');
+  s = s.replace(/[\d,]+\.\d{2}\s*-{2,}\s*ส่วนลด\s*-{2,}/g, '');
+  s = s.replace(/-\s+/g, ''); // ต่อคำไทยที่ถูกตัดขึ้นบรรทัดใหม่ด้วยยัติภังค์กลับเป็นคำเดียว
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+function parseReceiptPdf(lines, filename) {
+  const text = lines.join(' ');
+
+  const trackingNo = (text.match(RE_RECEIPT_TRACKING) || [])[1] || '';
+  const train = (text.match(RE_RECEIPT_TRAIN) || [])[1] || '';
+  const shipDate = receiptLabelValue(text, 'วันที่ส่ง');
+  const printedAt = receiptLabelValue(text, 'วันเวลาที่ออกใบส่งของ');
+
+  const originRaw = receiptLabelValue(text, 'สถานีส่ง');
+  const destRaw = receiptLabelValue(text, 'สถานีรับ');
+  const originMatch = originRaw.match(/^(\d{3,4})\s+(.+)$/);
+  const destMatch = destRaw.match(/^(\d{3,4})\s+(.+)$/);
+  const originCode = originMatch ? originMatch[1] : '';
+  const originName = originMatch ? originMatch[2].trim() : originRaw;
+  const destCode = destMatch ? destMatch[1] : '';
+  const destName = destMatch ? destMatch[2].trim() : destRaw;
+
+  let qty = 0, unit = '', m;
+  RE_RECEIPT_QTY.lastIndex = 0;
+  while ((m = RE_RECEIPT_QTY.exec(text)) !== null) { qty += parseInt(m[1], 10); unit = m[2]; }
+  if (!qty) qty = 1;
+
+  let weight = 0;
+  RE_RECEIPT_WEIGHT.lastIndex = 0;
+  while ((m = RE_RECEIPT_WEIGHT.exec(text)) !== null) weight += toNum(m[1]);
+
+  const itemMatch = text.match(RE_RECEIPT_ITEM_RAW);
+  const itemName = itemMatch ? cleanReceiptItemName(itemMatch[1]) : filename.replace(/\.pdf$/i, '');
+
+  const feeOf = label => {
+    const v = (text.match(feeAmountRe(label)) || [])[1];
+    return v == null ? null : toNum(v);
+  };
+  const freightFee = feeOf('ค่าระวาง');
+  const commissionFee = feeOf('ค่าธรรมเนียม');
+  const loadFee = feeOf('ค่าขนขึ้น');
+  const unloadFee = feeOf('ค่าขนลง');
+  const careFee = feeOf('ค่ารักษา');
+  const grandTotal = feeOf('รวมเงินทั้งสิ้น');
+
+  // ค่าระวาง+ค่าธ. ให้นิยามตรงกับคอลัมน์เดียวกันในไฟล์ใบนำมอบสินค้าห่อวัตถุ(รวม)
+  const freight = (freightFee || 0) + (commissionFee || 0);
+  const computedGrandTotal = freight + (loadFee || 0) + (unloadFee || 0) + (careFee || 0);
+  const internalOk = grandTotal == null ? null : Math.abs(computedGrandTotal - grandTotal) < 0.5;
+
+  const isVehicle = VEHICLE_UNITS.has(unit) || VEHICLE_NAME_RE.test(itemName);
+  const stationName = destName ? `${destCode} ${destName}` : 'ไม่ระบุสถานี';
+
+  const row = {
+    id: 0, sourceFile: filename, rowSource: 'pdf',
+    trackingNo, name: itemName, weight, qty, unit, isVehicle, freight,
+    station: { name: stationName, printedQty: null, rows: [] },
+  };
+
+  const meta = {
+    train, origin: originName ? `${originCode} ${originName}` : '',
+    rideDate: shipDate, printedAt,
+  };
+
+  return { meta, rows: [row], grandTotal, internalOk };
+}
+
+// แปลงแถวจากใบนำมอบสินค้าห่อวัตถุ(รวม) ให้อยู่ในรูปแบบเดียวกับแถวของ OCR/ใบส่งของ
+// เพื่อรวมเข้าตารางเดียวกันได้เมื่ออัปโหลดหลายไฟล์
+function mapManifestRowToCommon(row, filename) {
+  return {
+    id: 0, sourceFile: filename, rowSource: 'pdf',
+    trackingNo: row.trackingNo, name: row.name, weight: row.weight, qty: row.qty, unit: row.unit,
+    isVehicle: VEHICLE_UNITS.has(row.unit), freight: row.freight,
+    station: {
+      name: row.stationCode ? `${row.stationCode} ${row.stationName}` : row.stationName,
+      printedQty: null, rows: [],
+    },
+  };
+}
+
+// จัดกลุ่มแถว (จากไฟล์เดียวหรือหลายไฟล์รวมกัน) เป็นสถานีตามชื่อสถานีของแต่ละแถว
+function groupRowsIntoStations(rows) {
+  const byName = new Map();
+  for (const r of rows) {
+    const key = r.station.name;
+    if (!byName.has(key)) byName.set(key, { name: key, printedQty: r.station.printedQty, rows: [] });
+    const bucket = byName.get(key);
+    r.station = bucket;
+    bucket.rows.push(r);
+  }
+  return [...byName.values()];
+}
+
 // ---------- Dashboard-screenshot format (parsed via OCR) ----------
 // Different layout from the PDF manifest: grouped by station with a printed
 // "(จำนวน N ชิ้น)" count per station, no ค่าระวาง+ค่า ธ. column, and item rows
@@ -408,11 +616,12 @@ function parseDashboardOcr(lines) {
       const trackMatch = prefix.match(RE_OCR_TRACKING_GUESS);
       const name = it[2].trim();
       const row = {
-        id: rowId++,
+        id: rowId++, rowSource: 'ocr',
         trackingNo: trackMatch ? trackMatch[1] : '',
         name,
         weight: toNum(it[3]),
         qty: parseInt(it[4], 10),
+        unit: 'ชิ้น', freight: null,
         isVehicle: VEHICLE_NAME_RE.test(name),
         station: unassigned(),
       };
@@ -422,38 +631,49 @@ function parseDashboardOcr(lines) {
     // otherwise: status text, blank line, or OCR noise — ignore
   }
 
-  return buildOcrResult(meta, stations, rows);
+  return buildOcrResult(meta, stations, rows, 'ocr');
 }
 
 // Recomputes totals/station summaries from the (possibly user-edited) row
 // list — shared by the initial parse and every edit/add/delete in the review UI.
-function buildOcrResult(meta, stations, rows) {
+// Also used for the multi-file batch result (source: 'batch'), since a
+// combined upload needs the very same editable review UI and totals math.
+function buildOcrResult(meta, stations, rows, source = 'ocr') {
   const totalWeight = rows.reduce((s, r) => s + (r.weight || 0), 0);
+  const freightRows = rows.filter(r => r.freight != null);
+  const totalFreight = freightRows.length ? freightRows.reduce((s, r) => s + r.freight, 0) : null;
+
   const vehicleCount = rows.filter(r => r.isVehicle).reduce((s, r) => s + (r.qty || 0), 0);
-  const totalGoodsPieces = rows.filter(r => !r.isVehicle).reduce((s, r) => s + (r.qty || 0), 0);
+  const goodsRows = rows.filter(r => !r.isVehicle);
+  const totalGoodsPieces = goodsRows.reduce((s, r) => s + (r.qty || 0), 0);
   const totalPieces = totalGoodsPieces + vehicleCount;
+
+  const goodsUnitCounts = {};
+  for (const r of goodsRows) goodsUnitCounts[r.unit || ''] = (goodsUnitCounts[r.unit || ''] || 0) + (r.qty || 0);
 
   const stationSummaries = stations
     .filter(st => st.rows.length > 0)
     .map(st => {
       const qty = st.rows.reduce((s, r) => s + (r.qty || 0), 0);
+      const stFreightRows = st.rows.filter(r => r.freight != null);
+      const freight = stFreightRows.length ? stFreightRows.reduce((s, r) => s + r.freight, 0) : null;
       return {
         name: st.name,
         itemCount: st.rows.length,
         weight: st.rows.reduce((s, r) => s + (r.weight || 0), 0),
-        qty,
+        freight, qty,
         printedQty: st.printedQty,
         qtyMatches: st.printedQty == null ? null : qty === st.printedQty,
       };
     });
 
   return {
-    source: 'ocr',
+    source,
     meta, rows, stations: stationSummaries,
     totals: {
-      weight: totalWeight, freight: null, totalPieces, totalGoodsPieces, vehicleCount,
+      weight: totalWeight, freight: totalFreight, totalPieces, totalGoodsPieces, vehicleCount,
       parcelCount: rows.length,
-      goodsUnitCounts: totalGoodsPieces ? { 'ชิ้น': totalGoodsPieces } : {},
+      goodsUnitCounts,
     },
     printedTotal: null,
   };
@@ -473,24 +693,39 @@ function breakdownText(unitCounts) {
 let ocrState = null;
 
 function renderResult(data) {
-  const isOcr = data.source === 'ocr';
-  if (isOcr) ocrState = data;
+  const isReview = data.source !== 'pdf'; // 'ocr' or 'batch' — both use the editable review UI
+  if (isReview) ocrState = data;
 
   const { meta, totals } = data;
+  const ocrInvolved = data.rows.some(r => r.rowSource === 'ocr');
 
   document.getElementById('docMeta').innerHTML =
     `ขบวน <strong>${escapeHtml(meta.train || '-')}</strong>` +
     (meta.origin ? ` &nbsp;·&nbsp; ต้นทาง <strong>${escapeHtml(meta.origin)}</strong>` : '') +
     (meta.rideDate ? ` &nbsp;·&nbsp; วันที่ขึ้นขบวนรถ <strong>${escapeHtml(meta.rideDate)}</strong>` : '') +
     (meta.printedAt ? ` &nbsp;·&nbsp; พิมพ์เอกสารเมื่อ <strong>${escapeHtml(meta.printedAt)}</strong>` : '') +
-    (isOcr ? ' &nbsp;·&nbsp; <strong>อ่านจากรูปภาพด้วย OCR</strong>' : '');
+    (data.source === 'ocr' ? ' &nbsp;·&nbsp; <strong>อ่านจากรูปภาพด้วย OCR</strong>' : '') +
+    (data.source === 'batch' ? ` &nbsp;·&nbsp; <strong>รวมจาก ${fmtInt(data.fileResults ? data.fileResults.length : 1)} ไฟล์</strong>` : '');
 
-  document.getElementById('pdfDetailSection').hidden = isOcr;
-  document.getElementById('ocrDetailSection').hidden = !isOcr;
+  document.getElementById('pdfDetailSection').hidden = isReview;
+  document.getElementById('ocrDetailSection').hidden = !isReview;
+
+  if (data.fileResults) {
+    renderFileStatusList(data.fileResults);
+  } else {
+    document.getElementById('fileStatusList').hidden = true;
+  }
+
+  if (isReview) {
+    const warnEl = document.getElementById('ocrWarnText');
+    warnEl.textContent = ocrInvolved
+      ? 'บางรายการอ่านจากรูปภาพด้วย OCR ซึ่งอาจอ่านตัวเลขผิดพลาดได้ กรุณาตรวจสอบคอลัมน์ "น้ำหนัก" และ "จำนวน" ในตารางด้านล่าง แก้ไขได้โดยคลิกที่ตัวเลข ก่อนเชื่อผลสรุปด้านบน'
+      : 'ตารางด้านล่างรวมรายการจากไฟล์ที่อัปโหลดทั้งหมด แก้ไขตัวเลขหรือลบ/เพิ่มรายการได้โดยตรงหากพบข้อผิดพลาด';
+  }
 
   renderHeadlineAndVerify(data);
 
-  if (isOcr) {
+  if (isReview) {
     renderOcrTables(data);
   } else {
     renderPdfTables(data);
@@ -531,7 +766,7 @@ function renderHeadlineAndVerify(data) {
       verifyEl.className = 'verify-msg warn';
       verifyEl.textContent = `⚠ ยอดที่คำนวณไม่ตรงกับเอกสาร (เอกสารระบุ: ${fmtNum(printedTotal.weight)} กก., ${breakdownText(printedMap)}) — โปรดตรวจสอบไฟล์ต้นฉบับ`;
     }
-  } else if (source === 'ocr') {
+  } else if (source === 'ocr' || source === 'batch') {
     const checkable = stations.filter(s => s.qtyMatches !== null);
     const mismatches = checkable.filter(s => !s.qtyMatches);
     verifyEl.hidden = checkable.length === 0;
@@ -575,7 +810,26 @@ function renderPdfTables(data) {
     </tr>`).join('');
 }
 
-// ---------- OCR review table: editable weight/qty/vehicle, add/delete rows ----------
+// ---------- File status list (multi-file batch upload) ----------
+
+const KIND_LABEL = { manifest: 'PDF ใบนำมอบสินค้า', receipt: 'PDF ใบส่งของ', image: 'รูปภาพ (OCR)', unknown: 'ไม่รู้จัก' };
+
+function renderFileStatusList(fileResults) {
+  const el = document.getElementById('fileStatusList');
+  el.hidden = false;
+  el.innerHTML = fileResults.map(f => {
+    const status = !f.ok ? 'error' : (f.note ? 'warn' : 'ok');
+    const icon = status === 'error' ? '✕' : status === 'warn' ? '⚠' : '✓';
+    return `
+      <div class="file-status-row status-${status}">
+        <span class="ficon">${icon}</span>
+        <span class="fname">${escapeHtml(f.file)}</span>
+        <span class="fkind">${KIND_LABEL[f.kind] || f.kind}${f.rows.length ? ` · ${fmtInt(f.rows.length)} รายการ` : ''}${f.note ? ' · ' + escapeHtml(f.note) : ''}</span>
+      </div>`;
+  }).join('');
+}
+
+// ---------- Editable review table: shared by OCR-image results and multi-file batch results ----------
 
 function renderOcrStationTable(stations) {
   document.getElementById('ocrStationTableBody').innerHTML = stations.map(s => `
@@ -583,6 +837,7 @@ function renderOcrStationTable(stations) {
       <td>${escapeHtml(s.name)}</td>
       <td>${fmtInt(s.itemCount)}</td>
       <td>${fmtNum(s.weight)}</td>
+      <td>${s.freight == null ? '-' : fmtNum(s.freight)}</td>
       <td>${fmtInt(s.qty)}</td>
       <td>${s.qtyMatches === null ? '-' : s.qtyMatches ? '✓' : `⚠ ภาพระบุ ${fmtInt(s.printedQty)}`}</td>
     </tr>`).join('');
@@ -600,6 +855,7 @@ function renderOcrItemTable(data) {
   const stationNames = stationNamesOf(data);
   itBody.innerHTML = data.rows.map(r => `
     <tr data-row-id="${r.id}">
+      <td>${escapeHtml(r.sourceFile) || '<span class="hint">-</span>'}</td>
       <td>
         <select class="ocr-field" data-field="stationName">
           ${stationNames.map(n => `<option value="${escapeHtml(n)}" ${n === r.station.name ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}
@@ -666,7 +922,8 @@ document.getElementById('ocrAddRowBtn').addEventListener('click', () => {
   if (!bucket) bucket = { name: stationName, printedQty: null, rows: [] };
   const maxId = ocrState.rows.reduce((m, r) => Math.max(m, r.id), -1);
   ocrState.rows.push({
-    id: maxId + 1, trackingNo: '', name: '(รายการใหม่)', weight: 0, qty: 1, isVehicle: false, station: bucket,
+    id: maxId + 1, sourceFile: '(เพิ่มเอง)', rowSource: 'manual', trackingNo: '',
+    name: '(รายการใหม่)', weight: 0, qty: 1, unit: '', freight: null, isVehicle: false, station: bucket,
   });
   recomputeOcrRows();
   renderOcrItemTable(ocrState);
@@ -692,20 +949,14 @@ function fillSlip(data) {
       <td class="code">${escapeHtml(s.code || '')}</td>
       <td class="name">${escapeHtml(s.name)}</td>
       <td class="num">${fmtNum(s.weight)}</td>
-      <td class="num">${s.freight == null ? '-' : fmtNum(s.freight)}</td>
+      <td class="num">${s.freight != null ? fmtNum(s.freight) : fmtInt(s.qty) + ' ชิ้น'}</td>
     </tr>`).join('');
   table.innerHTML = `
-    <thead><tr><th class="code">รหัส</th><th class="name">สถานี</th><th class="num">กก.</th><th class="num">${source === 'ocr' ? 'ชิ้น' : 'บาท'}</th></tr></thead>
+    <thead><tr><th class="code">รหัส</th><th class="name">สถานี</th><th class="num">กก.</th><th class="num">บาท/จำนวน</th></tr></thead>
     <tbody>${rowsHtml}</tbody>`;
-  if (source === 'ocr') {
-    // swap the last numeric column to show item count instead of a freight figure that doesn't exist
-    [...table.querySelectorAll('tbody tr')].forEach((tr, i) => {
-      tr.children[3].textContent = fmtInt(stations[i].qty);
-    });
-  }
 
   document.getElementById('slipFooter').textContent =
-    (source === 'ocr' ? 'อ่านจากภาพด้วย OCR · ' : '') + 'พิมพ์เมื่อ ' + new Date().toLocaleString('th-TH');
+    (source !== 'pdf' ? 'มีรายการที่แก้ไข/รวมจากหลายไฟล์ · ' : '') + 'พิมพ์เมื่อ ' + new Date().toLocaleString('th-TH');
 }
 
 function escapeHtml(s) {

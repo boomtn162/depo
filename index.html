@@ -5,24 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>สรุปรายการขนส่ง</title>
 <!-- bump ?v= on both tags below whenever css/style.css or js/app.js changes, so browsers don't serve a stale cached copy -->
-<link rel="stylesheet" href="css/style.css?v=4">
+<link rel="stylesheet" href="css/style.css?v=5">
 </head>
 <body>
 
 <div class="app">
   <header class="app-header">
     <h1>สรุปรายการขนส่งจากใบนำมอบสินค้าห่อวัตถุ</h1>
-    <p class="sub">อัปโหลดไฟล์ PDF ใบนำมอบสินค้าห่อวัตถุ (รวม) เพื่อสรุปน้ำหนักรวม ค่าระวาง+ค่า ธ. และจำนวนสินค้า</p>
+    <p class="sub">อัปโหลดไฟล์ PDF ใบนำมอบสินค้าห่อวัตถุ (รวม) หรือใบส่งของ/ใบเสร็จรับเงินรายชิ้น เพื่อสรุปน้ำหนักรวม ค่าระวาง+ค่า ธ. และจำนวนสินค้า — แนบได้ทีละหลายไฟล์</p>
   </header>
 
   <section class="upload-box" id="uploadBox">
-    <input type="file" id="fileInput" accept="application/pdf,.pdf,image/png,image/jpeg,.png,.jpg,.jpeg" hidden>
+    <input type="file" id="fileInput" accept="application/pdf,.pdf,image/png,image/jpeg,.png,.jpg,.jpeg" multiple hidden>
     <div class="upload-inner" id="uploadInner">
       <div class="upload-icon">📄</div>
-      <p><button type="button" class="link-btn" id="pickFileBtn">เลือกไฟล์ PDF หรือรูปภาพ</button> หรือลากไฟล์มาวางที่นี่</p>
-      <p class="hint">รองรับไฟล์ PDF "ใบนำมอบสินค้าห่อวัตถุ(รวม)" หรือรูปภาพสกรีนช็อต (.png/.jpg) — ประมวลผลทั้งหมดในเบราว์เซอร์ ไม่มีการอัปโหลดขึ้นเซิร์ฟเวอร์</p>
-      <p class="hint">รูปภาพจะใช้ OCR อ่านข้อความ ซึ่งอาจมีความคลาดเคลื่อน โปรดตรวจสอบตัวเลขก่อนใช้งานจริง</p>
-      <p class="hint">ดูตัวอย่างไฟล์ PDF: <a href="samples/parcel_list_11.pdf" target="_blank" rel="noopener">ตัวอย่างที่ 1</a> · <a href="samples/parcel_list_13.pdf" target="_blank" rel="noopener">ตัวอย่างที่ 2 (มีรถ/แถวไม่มีหน่วย)</a></p>
+      <p><button type="button" class="link-btn" id="pickFileBtn">เลือกไฟล์ PDF หรือรูปภาพ</button> หรือลากไฟล์มาวางที่นี่ (เลือกได้ทีละหลายไฟล์)</p>
+      <p class="hint">รองรับไฟล์ PDF ทั้ง "ใบนำมอบสินค้าห่อวัตถุ(รวม)" และ "ใบส่งของ/ใบเสร็จรับเงิน" รายชิ้น หรือรูปภาพสกรีนช็อต (.png/.jpg) — ประมวลผลทั้งหมดในเบราว์เซอร์ ไม่มีการอัปโหลดขึ้นเซิร์ฟเวอร์</p>
+      <p class="hint">อัปโหลดหลายไฟล์พร้อมกันได้ ระบบจะรวมยอดจากทุกไฟล์ให้อัตโนมัติ · รูปภาพจะใช้ OCR อ่านข้อความ ซึ่งอาจมีความคลาดเคลื่อน โปรดตรวจสอบตัวเลขก่อนใช้งานจริง</p>
+      <p class="hint">ดูตัวอย่างไฟล์ PDF: <a href="samples/parcel_list_11.pdf" target="_blank" rel="noopener">ตัวอย่างที่ 1</a> · <a href="samples/parcel_list_13.pdf" target="_blank" rel="noopener">ตัวอย่างที่ 2 (มีรถ/แถวไม่มีหน่วย)</a> · <a href="samples/receipt_1.pdf" target="_blank" rel="noopener">ตัวอย่างใบส่งของรายชิ้น</a></p>
     </div>
   </section>
 
@@ -31,6 +31,7 @@
   <section id="resultSection" class="result-section" hidden>
 
     <div class="doc-meta" id="docMeta"></div>
+    <div id="fileStatusList" class="file-status-list" hidden></div>
 
     <div class="headline-cards">
       <div class="card">
@@ -104,9 +105,9 @@
     </div>
 
     <div id="ocrDetailSection" hidden>
-      <div class="ocr-warn">⚠️ ข้อมูลนี้อ่านจากรูปภาพด้วย OCR ซึ่ง<strong>อาจอ่านตัวเลขผิดพลาดได้</strong> กรุณาตรวจสอบคอลัมน์ "น้ำหนัก" และ "จำนวน" ในตารางด้านล่าง แก้ไขได้โดยคลิกที่ตัวเลข ก่อนเชื่อผลสรุปด้านบน</div>
+      <div class="ocr-warn" id="ocrWarn">⚠️ <span id="ocrWarnText"></span></div>
 
-      <h2 class="section-title">สรุปแยกตามสถานี (จากภาพ)</h2>
+      <h2 class="section-title">สรุปแยกตามสถานี</h2>
       <div class="table-wrap">
         <table id="ocrStationTable">
           <thead>
@@ -114,6 +115,7 @@
               <th>สถานี</th>
               <th>จำนวนรายการ</th>
               <th>น้ำหนัก (กก.)</th>
+              <th>ค่าระวาง+ค่า ธ.</th>
               <th>จำนวนชิ้นรวม</th>
               <th>ตรวจสอบ</th>
             </tr>
@@ -122,11 +124,12 @@
         </table>
       </div>
 
-      <h2 class="section-title">รายการที่อ่านได้ (แก้ไขได้)</h2>
+      <h2 class="section-title">รายการทั้งหมด (แก้ไขได้)</h2>
       <div class="table-wrap">
         <table id="ocrItemTable">
           <thead>
             <tr>
+              <th>ไฟล์</th>
               <th>สถานี</th>
               <th>เลขที่ (เดา)</th>
               <th>รายการ</th>
@@ -178,6 +181,6 @@
 <script src="vendor/pdfjs/pdf.min.js"></script>
 <script src="vendor/tesseract/tesseract.min.js"></script>
 <!-- bump ?v= here too whenever js/app.js changes -->
-<script src="js/app.js?v=6"></script>
+<script src="js/app.js?v=7"></script>
 </body>
 </html>

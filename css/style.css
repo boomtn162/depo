@@ -217,6 +217,46 @@ tfoot td {
   border-top: 2px solid var(--border);
 }
 
+/* ---------- Multi-file status list ---------- */
+
+.file-status-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.file-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+}
+
+.file-status-row .fname {
+  font-weight: 600;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-status-row .fkind {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.file-status-row .ficon { flex-shrink: 0; }
+.file-status-row.status-ok .ficon { color: var(--ok-ink); }
+.file-status-row.status-warn .ficon { color: var(--warn-ink); }
+.file-status-row.status-error { background: #fdecec; border-color: #f3c9c7; }
+.file-status-row.status-error .ficon { color: #a3231e; }
+
 /* ---------- OCR (image) review ---------- */
 
 .ocr-warn {
