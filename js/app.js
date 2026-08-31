@@ -940,6 +940,22 @@ document.getElementById('ocrAddRowBtn').addEventListener('click', () => {
   renderOcrItemTable(ocrState);
 });
 
+// จัดกลุ่มแถวตามคู่ "ต้นทาง-ปลายทาง" (ต่างจาก stations[] ที่จัดกลุ่มตามปลายทางอย่างเดียว)
+// ใช้เฉพาะตอนพิมพ์สลิปที่มีต้นทางหลายแห่งปนกัน เพื่อไม่ให้ยอดจากคนละต้นทางไปรวมกันในแถวเดียว
+function summarizeRowsByOriginDest(rows) {
+  const map = new Map();
+  for (const r of rows) {
+    const origin = r.origin || 'ไม่ระบุต้นทาง';
+    const key = origin + ' ' + r.station.name;
+    if (!map.has(key)) map.set(key, { origin, name: r.station.name, weight: 0, freight: 0, freightCount: 0, qty: 0 });
+    const b = map.get(key);
+    b.weight += r.weight || 0;
+    if (r.freight != null) { b.freight += r.freight; b.freightCount++; }
+    b.qty += r.qty || 0;
+  }
+  return [...map.values()].map(b => ({ ...b, freight: b.freightCount ? b.freight : null }));
+}
+
 function fillSlip(data) {
   const { meta, totals, stations, source, rows } = data;
   document.getElementById('slipTrain').textContent = `ขบวน ${meta.train || '-'}`;
@@ -966,16 +982,25 @@ function fillSlip(data) {
   document.getElementById('slipVehicles').textContent = `${fmtInt(totals.vehicleCount)} คัน`;
   document.getElementById('slipParcelCount').textContent = fmtInt(totals.parcelCount);
 
+  // เมื่อมีต้นทางมากกว่า 1 แห่งปนกัน (เช่น รวมหลายใบส่งของ) การจัดกลุ่มตามปลายทาง
+  // อย่างเดียวจะรวมพัสดุจากคนละต้นทางเข้าเป็นแถวเดียว ซ่อนว่าแต่ละส่วนมาจากไหน —
+  // ในกรณีนี้จึงจัดกลุ่มตามคู่ต้นทาง-ปลายทางแทน เพื่อให้เห็นต้นทางของแต่ละแถว
+  const multiOrigin = origins.length > 1;
+  const slipRows = multiOrigin ? summarizeRowsByOriginDest(rows) : stations;
+
+  document.getElementById('slipStationSubtitle').textContent =
+    multiOrigin ? 'สรุปแยกตามต้นทาง-ปลายทาง' : 'สรุปแยกตามสถานี';
+
   const table = document.getElementById('slipStationTable');
-  const rowsHtml = stations.map(s => `
+  const rowsHtml = slipRows.map(s => `
     <tr>
-      <td class="code">${escapeHtml(s.code || '')}</td>
+      ${multiOrigin ? `<td class="name">${escapeHtml(s.origin)}</td>` : `<td class="code">${escapeHtml(s.code || '')}</td>`}
       <td class="name">${escapeHtml(s.name)}</td>
       <td class="num">${fmtNum(s.weight)}</td>
       <td class="num">${s.freight != null ? fmtNum(s.freight) : fmtInt(s.qty) + ' ชิ้น'}</td>
     </tr>`).join('');
   table.innerHTML = `
-    <thead><tr><th class="code">รหัส</th><th class="name">สถานี</th><th class="num">กก.</th><th class="num">บาท/จำนวน</th></tr></thead>
+    <thead><tr>${multiOrigin ? '<th class="name">ต้นทาง</th>' : '<th class="code">รหัส</th>'}<th class="name">ปลายทาง</th><th class="num">กก.</th><th class="num">บาท/จำนวน</th></tr></thead>
     <tbody>${rowsHtml}</tbody>`;
 
   document.getElementById('slipFooter').textContent =
