@@ -935,9 +935,21 @@ document.getElementById('ocrAddRowBtn').addEventListener('click', () => {
 });
 
 function fillSlip(data) {
-  const { meta, totals, stations, source } = data;
-  document.getElementById('slipTrain').textContent =
-    `ขบวน ${meta.train || '-'}${meta.origin ? ' (' + meta.origin + ')' : ''}`;
+  const { meta, totals, stations, source, rows } = data;
+  document.getElementById('slipTrain').textContent = `ขบวน ${meta.train || '-'}`;
+
+  // ต้นทาง: เอกสารเดียวมีต้นทางเดียวเสมอ แต่การรวมหลายไฟล์อาจมีหลายต้นทางปนกันได้
+  const origins = [...new Set(rows.map(r => r.origin).filter(Boolean))];
+  const slipOriginEl = document.getElementById('slipOrigin');
+  if (origins.length === 0) {
+    slipOriginEl.hidden = true;
+  } else {
+    slipOriginEl.hidden = false;
+    slipOriginEl.textContent = origins.length <= 3
+      ? `ต้นทาง: ${origins.join(', ')}`
+      : `ต้นทาง: หลายสถานี (${origins.length} แห่ง)`;
+  }
+
   document.getElementById('slipDate').textContent =
     meta.rideDate ? `วันที่ขึ้นขบวนรถ ${meta.rideDate}` : '';
   document.getElementById('slipWeight').textContent = `${fmtNum(totals.weight)} กก.`;
