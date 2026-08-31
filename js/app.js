@@ -380,6 +380,7 @@ function parseManifest(lines) {
         unit, name,
         freight: toNum(full[5]),
         weight: toNum(full[6]),
+        origin: meta.origin,
         stationCode: unassigned().code,
         stationName: unassigned().name,
       };
@@ -398,6 +399,7 @@ function parseManifest(lines) {
         unit, name,
         freight: toNum(cont[3]),
         weight: toNum(cont[4]),
+        origin: meta.origin,
         stationCode: unassigned().code,
         stationName: unassigned().name,
       };
@@ -530,10 +532,11 @@ function parseReceiptPdf(lines, filename) {
 
   const isVehicle = VEHICLE_UNITS.has(unit) || VEHICLE_NAME_RE.test(itemName);
   const stationName = destName ? `${destCode} ${destName}` : 'ไม่ระบุสถานี';
+  const origin = originName ? `${originCode} ${originName}` : '';
 
   const row = {
     id: 0, sourceFile: filename, rowSource: 'pdf',
-    trackingNo, name: itemName, weight, qty, unit, isVehicle, freight,
+    trackingNo, name: itemName, weight, qty, unit, isVehicle, freight, origin,
     station: { name: stationName, printedQty: null, rows: [] },
   };
 
@@ -551,7 +554,7 @@ function mapManifestRowToCommon(row, filename) {
   return {
     id: 0, sourceFile: filename, rowSource: 'pdf',
     trackingNo: row.trackingNo, name: row.name, weight: row.weight, qty: row.qty, unit: row.unit,
-    isVehicle: VEHICLE_UNITS.has(row.unit), freight: row.freight,
+    isVehicle: VEHICLE_UNITS.has(row.unit), freight: row.freight, origin: row.origin || '',
     station: {
       name: row.stationCode ? `${row.stationCode} ${row.stationName}` : row.stationName,
       printedQty: null, rows: [],
@@ -621,7 +624,7 @@ function parseDashboardOcr(lines) {
         name,
         weight: toNum(it[3]),
         qty: parseInt(it[4], 10),
-        unit: 'ชิ้น', freight: null,
+        unit: 'ชิ้น', freight: null, origin: '',
         isVehicle: VEHICLE_NAME_RE.test(name),
         station: unassigned(),
       };
@@ -802,6 +805,7 @@ function renderPdfTables(data) {
     <tr>
       <td>${escapeHtml(r.seq)}</td>
       <td>${escapeHtml(r.trackingNo)}</td>
+      <td>${escapeHtml(r.origin) || '-'}</td>
       <td>${escapeHtml(r.stationName)}</td>
       <td>${fmtInt(r.qty)}${r.unit ? ' ' + escapeHtml(r.unit) : ''}</td>
       <td>${escapeHtml(r.name)}</td>
@@ -856,6 +860,7 @@ function renderOcrItemTable(data) {
   itBody.innerHTML = data.rows.map(r => `
     <tr data-row-id="${r.id}">
       <td>${escapeHtml(r.sourceFile) || '<span class="hint">-</span>'}</td>
+      <td>${escapeHtml(r.origin) || '<span class="hint">-</span>'}</td>
       <td>
         <select class="ocr-field" data-field="stationName">
           ${stationNames.map(n => `<option value="${escapeHtml(n)}" ${n === r.station.name ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}
@@ -923,7 +928,7 @@ document.getElementById('ocrAddRowBtn').addEventListener('click', () => {
   const maxId = ocrState.rows.reduce((m, r) => Math.max(m, r.id), -1);
   ocrState.rows.push({
     id: maxId + 1, sourceFile: '(เพิ่มเอง)', rowSource: 'manual', trackingNo: '',
-    name: '(รายการใหม่)', weight: 0, qty: 1, unit: '', freight: null, isVehicle: false, station: bucket,
+    name: '(รายการใหม่)', weight: 0, qty: 1, unit: '', freight: null, origin: '', isVehicle: false, station: bucket,
   });
   recomputeOcrRows();
   renderOcrItemTable(ocrState);

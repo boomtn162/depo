@@ -197,7 +197,8 @@ th, td {
 th:nth-child(2), td:nth-child(2),
 #stationTable th:nth-child(2), #stationTable td:nth-child(2),
 #itemTable th:nth-child(3), #itemTable td:nth-child(3),
-#itemTable th:nth-child(5), #itemTable td:nth-child(5) {
+#itemTable th:nth-child(4), #itemTable td:nth-child(4),
+#itemTable th:nth-child(6), #itemTable td:nth-child(6) {
   text-align: left;
   white-space: normal;
 }
@@ -272,6 +273,8 @@ tfoot td {
 #ocrItemTable th:nth-child(1), #ocrItemTable td:nth-child(1),
 #ocrItemTable th:nth-child(2), #ocrItemTable td:nth-child(2),
 #ocrItemTable th:nth-child(3), #ocrItemTable td:nth-child(3),
+#ocrItemTable th:nth-child(4), #ocrItemTable td:nth-child(4),
+#ocrItemTable th:nth-child(5), #ocrItemTable td:nth-child(5),
 #ocrStationTable th:nth-child(1), #ocrStationTable td:nth-child(1) {
   text-align: left;
   white-space: normal;
