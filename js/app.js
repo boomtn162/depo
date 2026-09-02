@@ -439,6 +439,7 @@ function parseManifest(lines) {
       parcelCount: st.rows.filter(r => r.trackingNo).length,
       weight: st.rows.reduce((s, r) => s + r.weight, 0),
       freight: st.rows.reduce((s, r) => s + r.freight, 0),
+      qty: st.rows.reduce((s, r) => s + r.qty, 0),
     }));
 
   return {
@@ -997,10 +998,11 @@ function fillSlip(data) {
       ${multiOrigin ? `<td class="name">${escapeHtml(s.origin)}</td>` : `<td class="code">${escapeHtml(s.code || '')}</td>`}
       <td class="name">${escapeHtml(s.name)}</td>
       <td class="num">${fmtNum(s.weight)}</td>
-      <td class="num">${s.freight != null ? fmtNum(s.freight) : fmtInt(s.qty) + ' ชิ้น'}</td>
+      <td class="num">${fmtInt(s.qty)}</td>
+      <td class="num">${s.freight == null ? '-' : fmtNum(s.freight)}</td>
     </tr>`).join('');
   table.innerHTML = `
-    <thead><tr>${multiOrigin ? '<th class="name">ต้นทาง</th>' : '<th class="code">รหัส</th>'}<th class="name">ปลายทาง</th><th class="num">กก.</th><th class="num">บาท/จำนวน</th></tr></thead>
+    <thead><tr>${multiOrigin ? '<th class="name">ต้นทาง</th>' : '<th class="code">รหัส</th>'}<th class="name">ปลายทาง</th><th class="num">กก.</th><th class="num">จำนวน</th><th class="num">บาท</th></tr></thead>
     <tbody>${rowsHtml}</tbody>`;
 
   document.getElementById('slipFooter').textContent =
