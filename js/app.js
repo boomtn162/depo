@@ -174,7 +174,7 @@ async function handleBatch(files) {
   // manifest/receipt rows are built with a placeholder id (they don't know
   // about sibling files while being parsed) — renumber now that everything
   // is combined, so each row in the edit table has a genuinely unique id
-  allRows.forEach((r, i) => { r.id = i; });
+  allRows.forEach((r, i) => { r.id = i; markOriginal(r); });
   if (allRows.length === 0) {
     setStatus('ไม่พบรายการที่อ่านได้จากไฟล์ที่อัปโหลดเลย โปรดตรวจสอบรูปแบบไฟล์', true);
     renderFileStatusList(fileResults);
@@ -641,6 +641,7 @@ function parseDashboardOcr(lines) {
     // otherwise: status text, blank line, or OCR noise — ignore
   }
 
+  rows.forEach(markOriginal);
   return buildOcrResult(meta, stations, rows, 'ocr');
 }
 
@@ -705,6 +706,9 @@ let ocrState = null;
 function renderResult(data) {
   const isReview = data.source !== 'pdf'; // 'ocr' or 'batch' — both use the editable review UI
   if (isReview) ocrState = data;
+
+  auditLog = [];
+  document.getElementById('auditLogSection').hidden = true;
 
   const { meta, totals } = data;
   const ocrInvolved = data.rows.some(r => r.rowSource === 'ocr');
@@ -864,22 +868,26 @@ const stationNamesOf = data => [...new Set(data.rows.map(r => r.station.name))];
 function renderOcrItemTable(data) {
   const itBody = document.getElementById('ocrItemTableBody');
   const stationNames = stationNamesOf(data);
-  itBody.innerHTML = data.rows.map(r => `
+  itBody.innerHTML = data.rows.map(r => {
+    const editedCls = f => isFieldEdited(r, f) ? ' ocr-field-edited' : '';
+    const editedTitle = f => isFieldEdited(r, f) ? `title="ค่าเดิม: ${escapeHtml(formatAuditValue(f, r.original[f]))}"` : '';
+    return `
     <tr data-row-id="${r.id}">
       <td>${escapeHtml(r.sourceFile) || '<span class="hint">-</span>'}</td>
       <td>${escapeHtml(r.origin) || '<span class="hint">-</span>'}</td>
       <td>
-        <select class="ocr-field" data-field="stationName">
+        <select class="ocr-field${editedCls('stationName')}" data-field="stationName" ${editedTitle('stationName')}>
           ${stationNames.map(n => `<option value="${escapeHtml(n)}" ${n === r.station.name ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}
         </select>
       </td>
       <td>${escapeHtml(r.trackingNo) || '<span class="hint">-</span>'}</td>
       <td>${escapeHtml(r.name)}</td>
-      <td><input class="ocr-field" data-field="weight" type="number" step="0.01" min="0" value="${r.weight}"></td>
-      <td><input class="ocr-field" data-field="qty" type="number" step="1" min="0" value="${r.qty}"></td>
-      <td><input class="ocr-field" data-field="isVehicle" type="checkbox" ${r.isVehicle ? 'checked' : ''}></td>
+      <td><input class="ocr-field${editedCls('weight')}" data-field="weight" type="number" step="0.01" min="0" value="${r.weight}" ${editedTitle('weight')}></td>
+      <td><input class="ocr-field${editedCls('qty')}" data-field="qty" type="number" step="1" min="0" value="${r.qty}" ${editedTitle('qty')}></td>
+      <td><input class="ocr-field${editedCls('isVehicle')}" data-field="isVehicle" type="checkbox" ${r.isVehicle ? 'checked' : ''} ${editedTitle('isVehicle')}></td>
       <td><button type="button" class="ocr-del-btn" data-del="${r.id}" title="ลบรายการนี้">✕</button></td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 }
 
 function recomputeOcrRows() {
@@ -898,12 +906,19 @@ function recomputeOcrRows() {
   fillSlip(ocrState);
 }
 
+function updateFieldEditedMark(el, row, field) {
+  const edited = isFieldEdited(row, field);
+  el.classList.toggle('ocr-field-edited', edited);
+  el.title = edited ? `ค่าเดิม: ${formatAuditValue(field, row.original[field])}` : '';
+}
+
 function handleOcrFieldChange(e) {
   const field = e.target.dataset.field;
   if (!field || !ocrState) return;
   const tr = e.target.closest('tr');
   const row = ocrState.rows.find(r => r.id === Number(tr.dataset.rowId));
   if (!row) return;
+  markOriginal(row);
   if (field === 'weight') row.weight = toNum(e.target.value) || 0;
   else if (field === 'qty') row.qty = parseInt(e.target.value, 10) || 0;
   else if (field === 'isVehicle') row.isVehicle = e.target.checked;
@@ -911,6 +926,7 @@ function handleOcrFieldChange(e) {
     const bucket = ocrState.rows.map(r => r.station).find(s => s.name === e.target.value);
     row.station = bucket || { name: e.target.value, printedQty: null, rows: [] };
   }
+  updateFieldEditedMark(e.target, row, field);
   recomputeOcrRows();
 }
 document.getElementById('ocrItemTableBody').addEventListener('input', handleOcrFieldChange);
@@ -918,9 +934,39 @@ document.getElementById('ocrItemTableBody').addEventListener('change', (e) => {
   if (e.target.tagName === 'SELECT') handleOcrFieldChange(e);
 });
 
+// บันทึกประวัติการแก้ไขครั้งเดียวต่อ "รอบแก้ไข" (โฟกัส -> พิมพ์ -> ออกจากช่อง)
+// ไม่ใช่ทุกครั้งที่กดคีย์ เพื่อไม่ให้ log รกจากการพิมพ์ทีละตัวอักษร
+document.getElementById('ocrItemTableBody').addEventListener('focusin', (e) => {
+  if (!e.target.matches('.ocr-field')) return;
+  e.target.dataset.beforeValue = e.target.type === 'checkbox' ? String(e.target.checked) : e.target.value;
+});
+document.getElementById('ocrItemTableBody').addEventListener('change', (e) => {
+  if (!e.target.matches('.ocr-field')) return;
+  const field = e.target.dataset.field;
+  const tr = e.target.closest('tr');
+  const row = ocrState && ocrState.rows.find(r => r.id === Number(tr.dataset.rowId));
+  const before = e.target.dataset.beforeValue;
+  if (!row || !field || before === undefined) return;
+  const after = e.target.type === 'checkbox' ? String(e.target.checked) : e.target.value;
+  if (before !== after) {
+    const fromVal = field === 'weight' ? toNum(before)
+      : field === 'qty' ? parseInt(before, 10)
+      : field === 'isVehicle' ? before === 'true'
+      : before;
+    const toVal = field === 'weight' ? row.weight
+      : field === 'qty' ? row.qty
+      : field === 'isVehicle' ? row.isVehicle
+      : row.station.name;
+    logAudit('edit', row, field, fromVal, toVal);
+  }
+  delete e.target.dataset.beforeValue;
+});
+
 document.getElementById('ocrItemTableBody').addEventListener('click', (e) => {
   const delId = e.target.dataset.del;
   if (delId === undefined || !ocrState) return;
+  const row = ocrState.rows.find(r => r.id === Number(delId));
+  if (row) logAudit('delete', row, null, null, null);
   ocrState.rows = ocrState.rows.filter(r => r.id !== Number(delId));
   recomputeOcrRows();
   renderOcrItemTable(ocrState);
@@ -933,10 +979,13 @@ document.getElementById('ocrAddRowBtn').addEventListener('click', () => {
   let bucket = ocrState.rows.map(r => r.station).find(s => s.name === stationName);
   if (!bucket) bucket = { name: stationName, printedQty: null, rows: [] };
   const maxId = ocrState.rows.reduce((m, r) => Math.max(m, r.id), -1);
-  ocrState.rows.push({
+  const newRow = {
     id: maxId + 1, sourceFile: '(เพิ่มเอง)', rowSource: 'manual', trackingNo: '',
     name: '(รายการใหม่)', weight: 0, qty: 1, unit: '', freight: null, origin: '', isVehicle: false, station: bucket,
-  });
+  };
+  markOriginal(newRow);
+  ocrState.rows.push(newRow);
+  logAudit('add', newRow, null, null, null);
   recomputeOcrRows();
   renderOcrItemTable(ocrState);
 });
@@ -955,6 +1004,64 @@ function summarizeRowsByOriginDest(rows) {
     b.qty += r.qty || 0;
   }
   return [...map.values()].map(b => ({ ...b, freight: b.freightCount ? b.freight : null }));
+}
+
+// ---------- Audit trail: tracks every correction made in the editable review table ----------
+
+// บันทึกค่าดั้งเดิมของแถว (ครั้งแรกที่เห็นแถวนี้เท่านั้น) ไว้เทียบว่ามีการแก้ไขหรือยัง
+function markOriginal(row) {
+  if (!row.original) {
+    row.original = { weight: row.weight, qty: row.qty, isVehicle: row.isVehicle, stationName: row.station.name };
+  }
+}
+
+function isFieldEdited(row, field) {
+  if (!row.original) return false;
+  if (field === 'weight') return Math.abs(row.weight - row.original.weight) > 1e-9;
+  if (field === 'qty') return row.qty !== row.original.qty;
+  if (field === 'isVehicle') return row.isVehicle !== row.original.isVehicle;
+  if (field === 'stationName') return row.station.name !== row.original.stationName;
+  return false;
+}
+
+function rowLabelFor(row) {
+  return `${row.sourceFile || ''} ${row.trackingNo || row.name || ''}`.trim();
+}
+
+let auditLog = [];
+
+const AUDIT_ACTION_LABEL = { edit: 'แก้ไข', delete: 'ลบ', add: 'เพิ่ม' };
+const AUDIT_FIELD_LABEL = { weight: 'น้ำหนัก', qty: 'จำนวน', isVehicle: 'ยานพาหนะ', stationName: 'สถานี' };
+
+function formatAuditValue(field, value) {
+  if (field === 'weight') return `${fmtNum(value)} กก.`;
+  if (field === 'qty') return fmtInt(value);
+  if (field === 'isVehicle') return value ? 'เป็นยานพาหนะ' : 'ไม่ใช่ยานพาหนะ';
+  return escapeHtml(value ?? '');
+}
+
+function logAudit(action, row, field, fromValue, toValue) {
+  auditLog.push({ time: new Date(), action, field, rowLabel: rowLabelFor(row), from: fromValue, to: toValue });
+  renderAuditLog();
+}
+
+function renderAuditLog() {
+  const section = document.getElementById('auditLogSection');
+  if (!auditLog.length) { section.hidden = true; return; }
+  section.hidden = false;
+  document.getElementById('auditLogTableBody').innerHTML = auditLog.slice().reverse().map(e => {
+    let change;
+    if (e.action === 'delete') change = 'ลบรายการนี้ออกจากตาราง';
+    else if (e.action === 'add') change = 'เพิ่มรายการใหม่ด้วยตนเอง';
+    else change = `${escapeHtml(AUDIT_FIELD_LABEL[e.field] || e.field)}: ${formatAuditValue(e.field, e.from)}<span class="audit-arrow">→</span>${formatAuditValue(e.field, e.to)}`;
+    return `
+      <tr>
+        <td>${e.time.toLocaleTimeString('th-TH')}</td>
+        <td>${AUDIT_ACTION_LABEL[e.action] || e.action}</td>
+        <td>${escapeHtml(e.rowLabel)}</td>
+        <td>${change}</td>
+      </tr>`;
+  }).join('');
 }
 
 function fillSlip(data) {
@@ -1005,8 +1112,11 @@ function fillSlip(data) {
     <thead><tr>${multiOrigin ? '<th class="name">ต้นทาง</th>' : '<th class="code">รหัส</th>'}<th class="name">ปลายทาง</th><th class="num">กก.</th><th class="num">จำนวน</th><th class="num">บาท</th></tr></thead>
     <tbody>${rowsHtml}</tbody>`;
 
+  const editNote = source !== 'pdf'
+    ? (auditLog.length ? `แก้ไขด้วยตนเอง ${fmtInt(auditLog.length)} รายการ · ` : 'รวมจากหลายไฟล์ · ')
+    : '';
   document.getElementById('slipFooter').textContent =
-    (source !== 'pdf' ? 'มีรายการที่แก้ไข/รวมจากหลายไฟล์ · ' : '') + 'พิมพ์เมื่อ ' + new Date().toLocaleString('th-TH');
+    editNote + 'พิมพ์เมื่อ ' + new Date().toLocaleString('th-TH');
 }
 
 function escapeHtml(s) {

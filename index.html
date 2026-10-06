@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>สรุปรายการขนส่ง</title>
 <!-- bump ?v= on both tags below whenever css/style.css or js/app.js changes, so browsers don't serve a stale cached copy -->
-<link rel="stylesheet" href="css/style.css?v=8">
+<link rel="stylesheet" href="css/style.css?v=9">
 </head>
 <body>
 
@@ -145,6 +145,23 @@
         </table>
       </div>
       <button type="button" class="secondary-btn" id="ocrAddRowBtn">+ เพิ่มรายการ</button>
+
+      <div id="auditLogSection" hidden>
+        <h2 class="section-title">ประวัติการแก้ไข</h2>
+        <div class="table-wrap">
+          <table id="auditLogTable">
+            <thead>
+              <tr>
+                <th>เวลา</th>
+                <th>การกระทำ</th>
+                <th>รายการ</th>
+                <th>การเปลี่ยนแปลง</th>
+              </tr>
+            </thead>
+            <tbody id="auditLogTableBody"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </section>
 </div>
@@ -184,6 +201,6 @@
 <script src="vendor/pdfjs/pdf.min.js"></script>
 <script src="vendor/tesseract/tesseract.min.js"></script>
 <!-- bump ?v= here too whenever js/app.js changes -->
-<script src="js/app.js?v=13"></script>
+<script src="js/app.js?v=14"></script>
 </body>
 </html>

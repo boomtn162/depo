@@ -315,6 +315,23 @@ tfoot td {
 
 #ocrAddRowBtn { margin-top: 10px; }
 
+/* field whose value no longer matches what was originally parsed */
+.ocr-field-edited {
+  background: #fff3cd !important;
+  border-color: #e0a800 !important;
+}
+
+#auditLogSection { margin-top: 28px; }
+
+#auditLogTable th:nth-child(3), #auditLogTable td:nth-child(3),
+#auditLogTable th:nth-child(4), #auditLogTable td:nth-child(4) {
+  text-align: left;
+  white-space: normal;
+}
+
+#auditLogTable td:nth-child(4) { color: var(--ink); }
+#auditLogTable .audit-arrow { color: var(--muted); margin: 0 4px; }
+
 /* ---------- Print slip (77mm x 166mm) ---------- */
 
 .slip {
