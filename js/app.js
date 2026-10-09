@@ -70,31 +70,11 @@ async function handleFiles(fileList) {
   if (!files.length) return;
   resultSection.hidden = true;
 
-  // A single manifest PDF or a single image keeps the original, more tightly
-  // verified single-file flow (exact cross-check / OCR review) unchanged.
-  if (files.length === 1 && IS_PDF(files[0])) {
-    setStatus('กำลังอ่านไฟล์ PDF ...');
-    try {
-      const lines = await extractLines(await files[0].arrayBuffer());
-      const kind = detectPdfKind(lines);
-      if (kind === 'manifest') {
-        const data = parseManifest(lines);
-        if (data.rows.length === 0) {
-          setStatus('อ่านไฟล์ได้ แต่ไม่พบรายการสินค้าตามรูปแบบที่รองรับ (ใบนำมอบสินค้าห่อวัตถุ(รวม))', true);
-          return;
-        }
-        clearStatus();
-        renderResult(data);
-        return;
-      }
-      // a receipt (or an unrecognized) single PDF goes through the same
-      // multi-file batch pipeline below so the code path stays in one place
-    } catch (err) {
-      console.error(err);
-      setStatus('เกิดข้อผิดพลาดขณะประมวลผลไฟล์ PDF: ' + (err && err.message ? err.message : err), true);
-      return;
-    }
-  } else if (files.length === 1 && IS_IMAGE(files[0])) {
+  // A single image keeps its own flow (needs OCR progress reporting); every
+  // PDF case — single manifest, single receipt, or multiple files of any
+  // mix — goes through the shared batch pipeline below, so every upload
+  // ends up in the same editable review table with the audit trail.
+  if (files.length === 1 && IS_IMAGE(files[0])) {
     setStatus('กำลังเตรียมระบบอ่านข้อความจากภาพ (OCR) ...');
     try {
       const lines = await extractLinesFromImage(files[0], pct =>
@@ -113,7 +93,7 @@ async function handleFiles(fileList) {
       setStatus('เกิดข้อผิดพลาดขณะอ่านภาพด้วย OCR: ' + (err && err.message ? err.message : err), true);
     }
     return;
-  } else if (files.length === 1) {
+  } else if (files.length === 1 && !IS_PDF(files[0])) {
     setStatus('กรุณาเลือกไฟล์ .pdf หรือรูปภาพ .png/.jpg เท่านั้น', true);
     return;
   }
@@ -137,6 +117,7 @@ async function handleBatch(files) {
           fileResults.push({
             file: file.name, kind: 'manifest', meta: manifest.meta, rows,
             ok: rows.length > 0, note: rows.length === 0 ? 'ไม่พบรายการในไฟล์นี้' : '',
+            printedTotal: manifest.printedTotal,
           });
         } else if (kind === 'receipt') {
           const receipt = parseReceiptPdf(lines, file.name);
@@ -185,6 +166,12 @@ async function handleBatch(files) {
   const meta = fileResults.find(f => f.ok && f.meta && f.meta.train)?.meta || { train: '', origin: '', rideDate: '', printedAt: '' };
   const data = buildOcrResult(meta, groupRowsIntoStations(allRows), allRows, 'batch');
   data.fileResults = fileResults;
+  // a single manifest PDF has its own printed grand-total line — when that's
+  // the only file uploaded, keep showing the exact cross-check against it
+  // (a multi-file batch has no single "document total" to compare against)
+  if (fileResults.length === 1 && fileResults[0].kind === 'manifest') {
+    data.printedTotal = fileResults[0].printedTotal;
+  }
   renderResult(data);
 }
 
@@ -661,6 +648,8 @@ function buildOcrResult(meta, stations, rows, source = 'ocr') {
 
   const goodsUnitCounts = {};
   for (const r of goodsRows) goodsUnitCounts[r.unit || ''] = (goodsUnitCounts[r.unit || ''] || 0) + (r.qty || 0);
+  const unitCounts = {};
+  for (const r of rows) unitCounts[r.unit || ''] = (unitCounts[r.unit || ''] || 0) + (r.qty || 0);
 
   const stationSummaries = stations
     .filter(st => st.rows.length > 0)
@@ -684,7 +673,7 @@ function buildOcrResult(meta, stations, rows, source = 'ocr') {
     totals: {
       weight: totalWeight, freight: totalFreight, totalPieces, totalGoodsPieces, vehicleCount,
       parcelCount: rows.length,
-      goodsUnitCounts,
+      goodsUnitCounts, unitCounts,
     },
     printedTotal: null,
   };
@@ -704,14 +693,17 @@ function breakdownText(unitCounts) {
 let ocrState = null;
 
 function renderResult(data) {
-  const isReview = data.source !== 'pdf'; // 'ocr' or 'batch' — both use the editable review UI
-  if (isReview) ocrState = data;
+  // every upload — single manifest PDF, single receipt, image OCR, or a
+  // multi-file batch — renders through the one editable review table below,
+  // so corrections are always possible and always tracked in the audit log
+  ocrState = data;
 
   auditLog = [];
   document.getElementById('auditLogSection').hidden = true;
 
-  const { meta, totals } = data;
+  const { meta } = data;
   const ocrInvolved = data.rows.some(r => r.rowSource === 'ocr');
+  const multiFile = data.fileResults && data.fileResults.length > 1;
 
   document.getElementById('docMeta').innerHTML =
     `ขบวน <strong>${escapeHtml(meta.train || '-')}</strong>` +
@@ -719,10 +711,9 @@ function renderResult(data) {
     (meta.rideDate ? ` &nbsp;·&nbsp; วันที่ขึ้นขบวนรถ <strong>${escapeHtml(meta.rideDate)}</strong>` : '') +
     (meta.printedAt ? ` &nbsp;·&nbsp; พิมพ์เอกสารเมื่อ <strong>${escapeHtml(meta.printedAt)}</strong>` : '') +
     (data.source === 'ocr' ? ' &nbsp;·&nbsp; <strong>อ่านจากรูปภาพด้วย OCR</strong>' : '') +
-    (data.source === 'batch' ? ` &nbsp;·&nbsp; <strong>รวมจาก ${fmtInt(data.fileResults ? data.fileResults.length : 1)} ไฟล์</strong>` : '');
+    (multiFile ? ` &nbsp;·&nbsp; <strong>รวมจาก ${fmtInt(data.fileResults.length)} ไฟล์</strong>` : '');
 
-  document.getElementById('pdfDetailSection').hidden = isReview;
-  document.getElementById('ocrDetailSection').hidden = !isReview;
+  document.getElementById('ocrDetailSection').hidden = false;
 
   if (data.fileResults) {
     renderFileStatusList(data.fileResults);
@@ -730,20 +721,13 @@ function renderResult(data) {
     document.getElementById('fileStatusList').hidden = true;
   }
 
-  if (isReview) {
-    const warnEl = document.getElementById('ocrWarnText');
-    warnEl.textContent = ocrInvolved
-      ? 'บางรายการอ่านจากรูปภาพด้วย OCR ซึ่งอาจอ่านตัวเลขผิดพลาดได้ กรุณาตรวจสอบคอลัมน์ "น้ำหนัก" และ "จำนวน" ในตารางด้านล่าง แก้ไขได้โดยคลิกที่ตัวเลข ก่อนเชื่อผลสรุปด้านบน'
-      : 'ตารางด้านล่างรวมรายการจากไฟล์ที่อัปโหลดทั้งหมด แก้ไขตัวเลขหรือลบ/เพิ่มรายการได้โดยตรงหากพบข้อผิดพลาด';
-  }
+  const warnEl = document.getElementById('ocrWarnText');
+  warnEl.textContent = ocrInvolved
+    ? 'บางรายการอ่านจากรูปภาพด้วย OCR ซึ่งอาจอ่านตัวเลขผิดพลาดได้ กรุณาตรวจสอบคอลัมน์ "น้ำหนัก" และ "จำนวน" ในตารางด้านล่าง แก้ไขได้โดยคลิกที่ตัวเลข ก่อนเชื่อผลสรุปด้านบน'
+    : 'ตรวจสอบรายการในตารางด้านล่าง แก้ไขตัวเลขหรือลบ/เพิ่มรายการได้โดยตรงหากพบข้อผิดพลาด';
 
   renderHeadlineAndVerify(data);
-
-  if (isReview) {
-    renderOcrTables(data);
-  } else {
-    renderPdfTables(data);
-  }
+  renderOcrTables(data);
 
   fillSlip(data);
   resultSection.hidden = false;
@@ -761,7 +745,7 @@ function renderHeadlineAndVerify(data) {
   document.getElementById('totalVehicles').textContent = fmtInt(totals.vehicleCount);
 
   const verifyEl = document.getElementById('verifyMsg');
-  if (source === 'pdf' && printedTotal) {
+  if (printedTotal) {
     const weightMatches = Math.abs(printedTotal.weight - totals.weight) < 0.05;
     const printedMap = {};
     printedTotal.breakdown.forEach(b => { printedMap[b.unit] = b.count; });
@@ -796,33 +780,6 @@ function renderHeadlineAndVerify(data) {
   } else {
     verifyEl.hidden = true;
   }
-}
-
-function renderPdfTables(data) {
-  const { stations, rows } = data;
-
-  const stBody = document.getElementById('stationTableBody');
-  stBody.innerHTML = stations.map(s => `
-    <tr>
-      <td>${escapeHtml(s.code)}</td>
-      <td>${escapeHtml(s.name)}</td>
-      <td>${fmtInt(s.parcelCount)}</td>
-      <td>${fmtNum(s.weight)}</td>
-      <td>${fmtNum(s.freight)}</td>
-    </tr>`).join('');
-
-  const itBody = document.getElementById('itemTableBody');
-  itBody.innerHTML = rows.map(r => `
-    <tr>
-      <td>${escapeHtml(r.seq)}</td>
-      <td>${escapeHtml(r.trackingNo)}</td>
-      <td>${escapeHtml(r.origin) || '-'}</td>
-      <td>${escapeHtml(r.stationName)}</td>
-      <td>${fmtInt(r.qty)}${r.unit ? ' ' + escapeHtml(r.unit) : ''}</td>
-      <td>${escapeHtml(r.name)}</td>
-      <td>${fmtNum(r.freight)}</td>
-      <td>${fmtNum(r.weight)}</td>
-    </tr>`).join('');
 }
 
 // ---------- File status list (multi-file batch upload) ----------
@@ -900,7 +857,13 @@ function recomputeOcrRows() {
     r.station = bucket;
     bucket.rows.push(r);
   }
+  // buildOcrResult() always returns a fresh object (printedTotal: null,
+  // no fileResults) — carry over the fields it doesn't know about so a
+  // single manifest PDF's exact-match check keeps re-verifying after edits
+  const { printedTotal, fileResults } = ocrState;
   ocrState = buildOcrResult(ocrState.meta, [...byName.values()], ocrState.rows, ocrState.source);
+  ocrState.printedTotal = printedTotal;
+  ocrState.fileResults = fileResults;
   renderHeadlineAndVerify(ocrState);
   renderOcrStationTable(ocrState.stations);
   fillSlip(ocrState);
@@ -1065,7 +1028,7 @@ function renderAuditLog() {
 }
 
 function fillSlip(data) {
-  const { meta, totals, stations, source, rows } = data;
+  const { meta, totals, stations, rows } = data;
   document.getElementById('slipTrain').textContent = `ขบวน ${meta.train || '-'}`;
 
   // ต้นทาง: เอกสารเดียวมีต้นทางเดียวเสมอ แต่การรวมหลายไฟล์อาจมีหลายต้นทางปนกันได้
@@ -1112,9 +1075,9 @@ function fillSlip(data) {
     <thead><tr>${multiOrigin ? '<th class="name">ต้นทาง</th>' : '<th class="code">รหัส</th>'}<th class="name">ปลายทาง</th><th class="num">กก.</th><th class="num">จำนวน</th><th class="num">บาท</th></tr></thead>
     <tbody>${rowsHtml}</tbody>`;
 
-  const editNote = source !== 'pdf'
-    ? (auditLog.length ? `แก้ไขด้วยตนเอง ${fmtInt(auditLog.length)} รายการ · ` : 'รวมจากหลายไฟล์ · ')
-    : '';
+  const editNote = auditLog.length
+    ? `แก้ไขด้วยตนเอง ${fmtInt(auditLog.length)} รายการ · `
+    : (data.fileResults && data.fileResults.length > 1 ? 'รวมจากหลายไฟล์ · ' : '');
   document.getElementById('slipFooter').textContent =
     editNote + 'พิมพ์เมื่อ ' + new Date().toLocaleString('th-TH');
 }

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>สรุปรายการขนส่ง</title>
 <!-- bump ?v= on both tags below whenever css/style.css or js/app.js changes, so browsers don't serve a stale cached copy -->
-<link rel="stylesheet" href="css/style.css?v=9">
+<link rel="stylesheet" href="css/style.css?v=10">
 </head>
 <body>
 
@@ -66,43 +66,6 @@
     <div class="actions">
       <button type="button" class="primary-btn" id="printSlipBtn">🖨️ พิมพ์สลิป 77×166 มม.</button>
       <button type="button" class="secondary-btn" id="resetBtn">อัปโหลดไฟล์ใหม่</button>
-    </div>
-
-    <div id="pdfDetailSection">
-      <h2 class="section-title">สรุปแยกตามสถานี/ปลายทาง</h2>
-      <div class="table-wrap">
-        <table id="stationTable">
-          <thead>
-            <tr>
-              <th>รหัส</th>
-              <th>สถานีปลายทาง</th>
-              <th>จำนวนพัสดุ</th>
-              <th>น้ำหนัก (กก.)</th>
-              <th>ค่าระวาง+ค่า ธ. (บาท)</th>
-            </tr>
-          </thead>
-          <tbody id="stationTableBody"></tbody>
-        </table>
-      </div>
-
-      <h2 class="section-title">รายการทั้งหมด</h2>
-      <div class="table-wrap">
-        <table id="itemTable">
-          <thead>
-            <tr>
-              <th>ลำดับ</th>
-              <th>เลขที่</th>
-              <th>ต้นทาง</th>
-              <th>ปลายทาง</th>
-              <th>จำนวน</th>
-              <th>รายการ</th>
-              <th>ค่าระวาง+ค่า ธ.</th>
-              <th>น้ำหนัก (กก.)</th>
-            </tr>
-          </thead>
-          <tbody id="itemTableBody"></tbody>
-        </table>
-      </div>
     </div>
 
     <div id="ocrDetailSection" hidden>
@@ -201,6 +164,6 @@
 <script src="vendor/pdfjs/pdf.min.js"></script>
 <script src="vendor/tesseract/tesseract.min.js"></script>
 <!-- bump ?v= here too whenever js/app.js changes -->
-<script src="js/app.js?v=14"></script>
+<script src="js/app.js?v=15"></script>
 </body>
 </html>
