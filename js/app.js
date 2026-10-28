@@ -992,11 +992,13 @@ function summarizeRowsByOriginDest(rows) {
   for (const r of rows) {
     const origin = r.origin || 'ไม่ระบุต้นทาง';
     const key = origin + ' ' + r.station.name;
-    if (!map.has(key)) map.set(key, { origin, name: r.station.name, weight: 0, freight: 0, freightCount: 0, qty: 0 });
+    if (!map.has(key)) map.set(key, { origin, name: r.station.name, weight: 0, freight: 0, freightCount: 0, qty: 0, itemCount: 0 });
     const b = map.get(key);
     b.weight += r.weight || 0;
     if (r.freight != null) { b.freight += r.freight; b.freightCount++; }
     b.qty += r.qty || 0;
+    // นับเป็น "รายการ/พัสดุ" เช่นเดียวกับที่ตารางสรุปแยกตามสถานีด้านบนคำนวณ — ไม่นับแถวต่อเนื่อง
+    if (r.isNewParcel !== false) b.itemCount++;
   }
   return [...map.values()].map(b => ({ ...b, freight: b.freightCount ? b.freight : null }));
 }
@@ -1100,11 +1102,12 @@ function fillSlip(data) {
       ${multiOrigin ? `<td class="name">${escapeHtml(s.origin)}</td>` : `<td class="code">${escapeHtml(s.code || '')}</td>`}
       <td class="name">${escapeHtml(s.name)}</td>
       <td class="num">${fmtNum(s.weight)}</td>
+      <td class="num">${fmtInt(s.itemCount)}</td>
       <td class="num">${fmtInt(s.qty)}</td>
       <td class="num">${s.freight == null ? '-' : fmtNum(s.freight)}</td>
     </tr>`).join('');
   table.innerHTML = `
-    <thead><tr>${multiOrigin ? '<th class="name">ต้นทาง</th>' : '<th class="code">รหัส</th>'}<th class="name">ปลายทาง</th><th class="num">กก.</th><th class="num">จำนวน</th><th class="num">บาท</th></tr></thead>
+    <thead><tr>${multiOrigin ? '<th class="name">ต้นทาง</th>' : '<th class="code">รหัส</th>'}<th class="name">ปลายทาง</th><th class="num">กก.</th><th class="num">รายการ</th><th class="num">จำนวน</th><th class="num">บาท</th></tr></thead>
     <tbody>${rowsHtml}</tbody>`;
 
   const editNote = auditLog.length
