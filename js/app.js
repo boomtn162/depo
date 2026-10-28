@@ -461,11 +461,11 @@ function receiptLabelValue(text, label) {
 
 const RE_RECEIPT_TRACKING = /เลขที่\s*:\s*(\S+)/;
 const RE_RECEIPT_TRAIN = /ขบวนรถ\s*:\s*(\S+)/;
-const RE_RECEIPT_QTY = /จำนวน\s*(\d+)\s*(\S+)/g;
-const RE_RECEIPT_WEIGHT = /น้ำหนัก\s*([\d.,]+)\s*\/?\s*[\d.,]*\s*กิโลกรัม/g;
-// ชื่อรายการอยู่ระหว่าง "1." (ลำดับที่ในตาราง) กับ "จำนวน N หน่วย" แต่มักมีข้อความ
-// จากคอลัมน์ค่าธรรมเนียมข้างๆ ปนมาด้วย (เพราะอยู่แถวเดียวกันในตาราง) ต้องกรองออก
-const RE_RECEIPT_ITEM_RAW = /(?:^|\s)1\.\s*(.+?)\s*จำนวน\s*\d+\s*\S+/;
+const RE_RECEIPT_WEIGHT = /น้ำหนัก\s*([\d.,]+)\s*\/?\s*[\d.,]*\s*กิโลกรัม/;
+// ชื่อรายการอยู่ระหว่างเลขลำดับ (ตัดออกไปแล้วตอนแยกเป็นช่วงๆ ด้วย splitReceiptItems)
+// กับ "จำนวน N หน่วย" แต่มักมีข้อความจากคอลัมน์ค่าธรรมเนียมข้างๆ ปนมาด้วย (เพราะอยู่
+// แถวเดียวกันในตาราง) ต้องกรองออกด้วย cleanReceiptItemName
+const RE_RECEIPT_ITEM_SEG = /^(.+?)\s*จำนวน\s*(\d+)\s*(\S+)/;
 const RECEIPT_FEE_LABELS = ['ค่าระวาง', 'ค่าธรรมเนียม', 'ค่าขนขึ้น', 'ค่าขนลง', 'ค่ารักษา'];
 const feeAmountRe = label => new RegExp('([\\d,]+\\.\\d{2})\\s*' + label + '(?!\\S)');
 
@@ -475,6 +475,24 @@ function cleanReceiptItemName(raw) {
   s = s.replace(/[\d,]+\.\d{2}\s*-{2,}\s*ส่วนลด\s*-{2,}/g, '');
   s = s.replace(/-\s+/g, ''); // ต่อคำไทยที่ถูกตัดขึ้นบรรทัดใหม่ด้วยยัติภังค์กลับเป็นคำเดียว
   return s.replace(/\s+/g, ' ').trim();
+}
+
+// ใบส่งของหนึ่งใบอาจมีมากกว่า 1 รายการสินค้า (คนละชนิด) โดยแต่ละรายการมีค่าระวาง/
+// ค่าธรรมเนียมของตัวเองแยกกัน — แบ่งข้อความเป็นช่วงๆ ตามเลขลำดับ "1." "2." ... ที่
+// เรียงกันจริง (ไม่ใช่ตัวเลขอื่นที่บังเอิญตามด้วยจุด เช่นในวันที่หรือราคา) แต่ละช่วงคือ
+// ข้อความของรายการนั้น (ไม่รวมเลขลำดับเอง) ไปจนถึงก่อนเลขลำดับถัดไป
+function splitReceiptItems(text) {
+  const markerRe = /(?:^|\s)(\d+)\.\s/g;
+  let m, expected = 1;
+  const starts = [];
+  while ((m = markerRe.exec(text)) !== null) {
+    if (parseInt(m[1], 10) === expected) {
+      starts.push(m.index + m[0].length);
+      expected++;
+    }
+  }
+  if (starts.length === 0) return [text];
+  return starts.map((start, i) => text.slice(start, i + 1 < starts.length ? starts[i + 1] : text.length));
 }
 
 function parseReceiptPdf(lines, filename) {
@@ -493,52 +511,57 @@ function parseReceiptPdf(lines, filename) {
   const originName = originMatch ? originMatch[2].trim() : originRaw;
   const destCode = destMatch ? destMatch[1] : '';
   const destName = destMatch ? destMatch[2].trim() : destRaw;
-
-  let qty = 0, unit = '', m;
-  RE_RECEIPT_QTY.lastIndex = 0;
-  while ((m = RE_RECEIPT_QTY.exec(text)) !== null) { qty += parseInt(m[1], 10); unit = m[2]; }
-  if (!qty) qty = 1;
-
-  let weight = 0;
-  RE_RECEIPT_WEIGHT.lastIndex = 0;
-  while ((m = RE_RECEIPT_WEIGHT.exec(text)) !== null) weight += toNum(m[1]);
-
-  const itemMatch = text.match(RE_RECEIPT_ITEM_RAW);
-  const itemName = itemMatch ? cleanReceiptItemName(itemMatch[1]) : filename.replace(/\.pdf$/i, '');
-
-  const feeOf = label => {
-    const v = (text.match(feeAmountRe(label)) || [])[1];
-    return v == null ? null : toNum(v);
-  };
-  const freightFee = feeOf('ค่าระวาง');
-  const commissionFee = feeOf('ค่าธรรมเนียม');
-  const loadFee = feeOf('ค่าขนขึ้น');
-  const unloadFee = feeOf('ค่าขนลง');
-  const careFee = feeOf('ค่ารักษา');
-  const grandTotal = feeOf('รวมเงินทั้งสิ้น');
-
-  // ค่าระวาง+ค่าธ. ให้นิยามตรงกับคอลัมน์เดียวกันในไฟล์ใบนำมอบสินค้าห่อวัตถุ(รวม)
-  const freight = (freightFee || 0) + (commissionFee || 0);
-  const computedGrandTotal = freight + (loadFee || 0) + (unloadFee || 0) + (careFee || 0);
-  const internalOk = grandTotal == null ? null : Math.abs(computedGrandTotal - grandTotal) < 0.5;
-
-  const isVehicle = VEHICLE_UNITS.has(unit) || VEHICLE_NAME_RE.test(itemName);
   const stationName = destName ? `${destCode} ${destName}` : 'ไม่ระบุสถานี';
   const origin = originName ? `${originCode} ${originName}` : '';
 
-  const row = {
-    id: 0, // placeholder — handleBatch() renumbers all rows once combined
-    sourceFile: filename, rowSource: 'pdf',
-    trackingNo, name: itemName, weight, qty, unit, isVehicle, freight, origin,
-    station: { name: stationName, printedQty: null, rows: [] },
-  };
+  const grandTotalMatch = text.match(feeAmountRe('รวมเงินทั้งสิ้น'));
+  const grandTotal = grandTotalMatch ? toNum(grandTotalMatch[1]) : null;
+
+  // ตัดข้อความให้เหลือเฉพาะส่วนรายการสินค้า (ก่อนบรรทัดสรุปยอดรวม) กันไม่ให้ข้อความ
+  // ท้ายใบ (เงื่อนไข/ลายเซ็น) ปนเข้ามาตอนแยกรายการ
+  const itemsText = text.split('จำนวนเงินรวมทั้งสิ้น')[0];
+
+  let computedGrandTotal = 0;
+  const rows = splitReceiptItems(itemsText).map(seg => {
+    const itemMatch = seg.match(RE_RECEIPT_ITEM_SEG);
+    const qty = itemMatch ? parseInt(itemMatch[2], 10) || 1 : 1;
+    const unit = itemMatch ? itemMatch[3] : '';
+    const itemName = cleanReceiptItemName(itemMatch ? itemMatch[1] : filename.replace(/\.pdf$/i, ''));
+
+    const weightMatch = seg.match(RE_RECEIPT_WEIGHT);
+    const weight = weightMatch ? toNum(weightMatch[1]) : 0;
+
+    const feeOf = label => {
+      const v = (seg.match(feeAmountRe(label)) || [])[1];
+      return v == null ? null : toNum(v);
+    };
+    const freightFee = feeOf('ค่าระวาง');
+    const commissionFee = feeOf('ค่าธรรมเนียม');
+    const loadFee = feeOf('ค่าขนขึ้น');
+    const unloadFee = feeOf('ค่าขนลง');
+    const careFee = feeOf('ค่ารักษา');
+    // ค่าระวาง+ค่าธ. ให้นิยามตรงกับคอลัมน์เดียวกันในไฟล์ใบนำมอบสินค้าห่อวัตถุ(รวม)
+    const freight = (freightFee || 0) + (commissionFee || 0);
+    computedGrandTotal += freight + (loadFee || 0) + (unloadFee || 0) + (careFee || 0);
+
+    const isVehicle = VEHICLE_UNITS.has(unit) || VEHICLE_NAME_RE.test(itemName);
+
+    return {
+      id: 0, // placeholder — handleBatch() renumbers all rows once combined
+      sourceFile: filename, rowSource: 'pdf',
+      trackingNo, name: itemName, weight, qty, unit, isVehicle, freight, origin,
+      station: { name: stationName, printedQty: null, rows: [] },
+    };
+  });
+
+  const internalOk = grandTotal == null ? null : Math.abs(computedGrandTotal - grandTotal) < 0.5;
 
   const meta = {
     train, origin: originName ? `${originCode} ${originName}` : '',
     rideDate: shipDate, printedAt,
   };
 
-  return { meta, rows: [row], grandTotal, internalOk };
+  return { meta, rows, grandTotal, internalOk };
 }
 
 // แปลงแถวจากใบนำมอบสินค้าห่อวัตถุ(รวม) ให้อยู่ในรูปแบบเดียวกับแถวของ OCR/ใบส่งของ
