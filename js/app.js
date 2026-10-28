@@ -522,7 +522,7 @@ function parseReceiptPdf(lines, filename) {
   const itemsText = text.split('จำนวนเงินรวมทั้งสิ้น')[0];
 
   let computedGrandTotal = 0;
-  const rows = splitReceiptItems(itemsText).map(seg => {
+  const rows = splitReceiptItems(itemsText).map((seg, idx) => {
     const itemMatch = seg.match(RE_RECEIPT_ITEM_SEG);
     const qty = itemMatch ? parseInt(itemMatch[2], 10) || 1 : 1;
     const unit = itemMatch ? itemMatch[3] : '';
@@ -551,6 +551,9 @@ function parseReceiptPdf(lines, filename) {
       sourceFile: filename, rowSource: 'pdf',
       trackingNo, name: itemName, weight, qty, unit, isVehicle, freight, origin,
       station: { name: stationName, printedQty: null, rows: [] },
+      // หลายรายการในใบส่งของเดียวกันยังนับเป็น "รายการ" (พัสดุ) เดียว — มีแค่
+      // รายการแรกเท่านั้นที่นับ ที่เหลือถือเป็นรายการสินค้าเพิ่มเติมของพัสดุเดียวกัน
+      isNewParcel: idx === 0,
     };
   });
 
@@ -576,6 +579,9 @@ function mapManifestRowToCommon(row, filename) {
       name: row.stationCode ? `${row.stationCode} ${row.stationName}` : row.stationName,
       printedQty: null, rows: [],
     },
+    // แถวต่อเนื่อง (รายการสินค้าเพิ่มเติมของพัสดุเดียวกัน ไม่มีเลขที่เป็นของตัวเอง)
+    // ไม่นับเป็นพัสดุใหม่ — เหมือนที่ parseManifest() คำนวณ parcelCount เอง
+    isNewParcel: !!row.trackingNo,
   };
 }
 
@@ -682,7 +688,8 @@ function buildOcrResult(meta, stations, rows, source = 'ocr') {
       const freight = stFreightRows.length ? stFreightRows.reduce((s, r) => s + r.freight, 0) : null;
       return {
         name: st.name,
-        itemCount: st.rows.length,
+        // นับเป็น "รายการ/พัสดุ" ไม่ใช่จำนวนแถวดิบ — ให้ตรงกับการ์ดสรุปด้านบน
+        itemCount: st.rows.filter(r => r.isNewParcel !== false).length,
         weight: st.rows.reduce((s, r) => s + (r.weight || 0), 0),
         freight, qty,
         printedQty: st.printedQty,
@@ -695,7 +702,9 @@ function buildOcrResult(meta, stations, rows, source = 'ocr') {
     meta, rows, stations: stationSummaries,
     totals: {
       weight: totalWeight, freight: totalFreight, totalPieces, totalGoodsPieces, vehicleCount,
-      parcelCount: rows.length,
+      // แถวที่ไม่ได้ทำเครื่องหมาย isNewParcel (เช่น จากภาพ OCR หรือเพิ่มเอง) ถือเป็น
+      // พัสดุใหม่เสมอ — มีแค่แถวต่อเนื่องของใบส่งของ/ใบนำมอบฯ เท่านั้นที่ถูกยกเว้น
+      parcelCount: rows.filter(r => r.isNewParcel !== false).length,
       goodsUnitCounts, unitCounts,
     },
     printedTotal: null,
