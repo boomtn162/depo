@@ -987,13 +987,14 @@ document.getElementById('ocrAddRowBtn').addEventListener('click', () => {
 
 // จัดกลุ่มแถวตามคู่ "ต้นทาง-ปลายทาง" (ต่างจาก stations[] ที่จัดกลุ่มตามปลายทางอย่างเดียว)
 // ใช้เฉพาะตอนพิมพ์สลิปที่มีต้นทางหลายแห่งปนกัน เพื่อไม่ให้ยอดจากคนละต้นทางไปรวมกันในแถวเดียว
-function summarizeRowsByOriginDest(rows) {
+// ใช้ตอนมีหลายต้นทางปนกัน (เช่น สถานีปลายทางรวบรวมพัสดุจากหลายสถานีต้นทาง) — สรุป
+// ตามต้นทางอย่างเดียว ไม่แยกตามปลายทางด้วย เพราะปลายทางมักเป็นสถานีเดียวกันอยู่แล้ว
+function summarizeRowsByOrigin(rows) {
   const map = new Map();
   for (const r of rows) {
     const origin = r.origin || 'ไม่ระบุต้นทาง';
-    const key = origin + ' ' + r.station.name;
-    if (!map.has(key)) map.set(key, { origin, name: r.station.name, weight: 0, freight: 0, freightCount: 0, qty: 0, itemCount: 0 });
-    const b = map.get(key);
+    if (!map.has(origin)) map.set(origin, { origin, weight: 0, freight: 0, freightCount: 0, qty: 0, itemCount: 0 });
+    const b = map.get(origin);
     b.weight += r.weight || 0;
     if (r.freight != null) { b.freight += r.freight; b.freightCount++; }
     b.qty += r.qty || 0;
@@ -1087,27 +1088,26 @@ function fillSlip(data) {
   document.getElementById('slipVehicles').textContent = `${fmtInt(totals.vehicleCount)} คัน`;
   document.getElementById('slipParcelCount').textContent = fmtInt(totals.parcelCount);
 
-  // เมื่อมีต้นทางมากกว่า 1 แห่งปนกัน (เช่น รวมหลายใบส่งของ) การจัดกลุ่มตามปลายทาง
-  // อย่างเดียวจะรวมพัสดุจากคนละต้นทางเข้าเป็นแถวเดียว ซ่อนว่าแต่ละส่วนมาจากไหน —
-  // ในกรณีนี้จึงจัดกลุ่มตามคู่ต้นทาง-ปลายทางแทน เพื่อให้เห็นต้นทางของแต่ละแถว
+  // เมื่อมีต้นทางมากกว่า 1 แห่งปนกัน (เช่น รวมหลายใบส่งของ) ปลายทางมักเป็นสถานีเดียวกัน
+  // อยู่แล้ว (สถานีที่รวบรวมของ) จึงสรุปตามต้นทางอย่างเดียวแทนตามปลายทาง
   const multiOrigin = origins.length > 1;
-  const slipRows = multiOrigin ? summarizeRowsByOriginDest(rows) : stations;
+  const slipRows = multiOrigin ? summarizeRowsByOrigin(rows) : stations;
 
   document.getElementById('slipStationSubtitle').textContent =
-    multiOrigin ? 'สรุปแยกตามต้นทาง-ปลายทาง' : 'สรุปแยกตามสถานี';
+    multiOrigin ? 'สรุปแยกตามต้นทาง' : 'สรุปแยกตามสถานี';
 
   const table = document.getElementById('slipStationTable');
   const rowsHtml = slipRows.map(s => `
     <tr>
-      ${multiOrigin ? `<td class="name">${escapeHtml(s.origin)}</td>` : `<td class="code">${escapeHtml(s.code || '')}</td>`}
-      <td class="name">${escapeHtml(s.name)}</td>
+      <td class="${multiOrigin ? 'name' : 'code'}">${escapeHtml(multiOrigin ? s.origin : (s.code || ''))}</td>
+      ${multiOrigin ? '' : `<td class="name">${escapeHtml(s.name)}</td>`}
       <td class="num">${fmtNum(s.weight)}</td>
       <td class="num">${fmtInt(s.itemCount)}</td>
       <td class="num">${fmtInt(s.qty)}</td>
       <td class="num">${s.freight == null ? '-' : fmtNum(s.freight)}</td>
     </tr>`).join('');
   table.innerHTML = `
-    <thead><tr>${multiOrigin ? '<th class="name">ต้นทาง</th>' : '<th class="code">รหัส</th>'}<th class="name">ปลายทาง</th><th class="num">กก.</th><th class="num">รายการ</th><th class="num">จำนวน</th><th class="num">บาท</th></tr></thead>
+    <thead><tr><th class="${multiOrigin ? 'name' : 'code'}">${multiOrigin ? 'ต้นทาง' : 'รหัส'}</th>${multiOrigin ? '' : '<th class="name">ปลายทาง</th>'}<th class="num">กก.</th><th class="num">รายการ</th><th class="num">จำนวน</th><th class="num">บาท</th></tr></thead>
     <tbody>${rowsHtml}</tbody>`;
 
   const editNote = auditLog.length
